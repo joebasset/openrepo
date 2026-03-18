@@ -1,0 +1,21 @@
+package tests
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	internalhttp "{{ .ModulePath }}/internal/http"
+)
+
+func TestHealth(t *testing.T) {
+	router := internalhttp.NewRouter()
+	request := httptest.NewRequest(http.MethodGet, "/health", nil)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+}

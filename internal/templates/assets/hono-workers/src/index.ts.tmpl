@@ -1,0 +1,20 @@
+import { Hono } from "hono";
+
+import { appEnvSchema } from "./lib/env";
+
+const app = new Hono();
+
+app.get("/health", (context) => {
+  return context.json({ status: "ok" });
+});
+
+app.get("/meta", (context) => {
+  const environment = appEnvSchema.parse(context.req.query("environment") ?? "development");
+
+  return context.json({
+    service: "{{ .ProjectSlug }}-api",
+    environment,
+  });
+});
+
+export default app;

@@ -1,0 +1,55 @@
+# Binaries for programs
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, should not be ignored
+# *.test
+
+# End of test binary
+
+# Output of the go coverage tool
+*.out
+
+# End of coverage output
+
+# Dependency directories (golang dep)
+# vendor/
+
+# Dependency directories (Go modules)
+# vendor/ is generally not ignored if you want the project to be buildable offline
+# (i.e. during a CI/CD process without internet access)
+# If you choose to ignore it, uncomment the following line:
+# vendor/
+
+# Environment files
+.env
+.env.local
+.smoke-demo
+
+testrepo
+
+# Go workspace file
+go.work
+
+
+# Go cache
+# Command to remove go cache
+# $ go clean -cache
+.cache/
+
+# Code coverage reports
+cover.out
+
+
+# Go build cache
+# $ go clean -modcache
+pkg/
+
+#agents
+
+.agents
+plan.md
+AGENTS.md

@@ -1,0 +1,22 @@
+package main
+
+import (
+	"log"
+	"net/http"
+	"os"
+
+	internalhttp "{{ .ModulePath }}/internal/http"
+)
+
+func main() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	router := internalhttp.NewRouter()
+
+	if err := http.ListenAndServe(":"+port, router); err != nil {
+		log.Fatal(err)
+	}
+}

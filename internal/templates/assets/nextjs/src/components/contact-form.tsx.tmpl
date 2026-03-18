@@ -1,0 +1,63 @@
+"use client";
+
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+
+const contactSchema = z.object({
+  name: z.string().min(2),
+  email: z.string().email(),
+  message: z.string().min(10),
+});
+
+type ContactValues = z.infer<typeof contactSchema>;
+
+export function ContactForm() {
+  const form = useForm<ContactValues>({
+    resolver: zodResolver(contactSchema),
+    defaultValues: {
+      name: "",
+      email: "",
+      message: "",
+    },
+  });
+
+  const onSubmit = (values: ContactValues) => {
+    form.reset(values);
+  };
+
+  return (
+    <form className="grid gap-4" onSubmit={form.handleSubmit(onSubmit)}>
+      <label className="grid gap-2 text-sm">
+        <span>Name</span>
+        <input
+          className="rounded-2xl border border-stone-700 bg-stone-950 px-4 py-3"
+          {...form.register("name")}
+        />
+      </label>
+
+      <label className="grid gap-2 text-sm">
+        <span>Email</span>
+        <input
+          className="rounded-2xl border border-stone-700 bg-stone-950 px-4 py-3"
+          {...form.register("email")}
+        />
+      </label>
+
+      <label className="grid gap-2 text-sm">
+        <span>Message</span>
+        <textarea
+          className="min-h-32 rounded-2xl border border-stone-700 bg-stone-950 px-4 py-3"
+          {...form.register("message")}
+        />
+      </label>
+
+      <button
+        className="inline-flex w-fit rounded-full bg-emerald-300 px-5 py-3 text-sm font-medium text-stone-950"
+        type="submit"
+      >
+        Submit
+      </button>
+    </form>
+  );
+}
