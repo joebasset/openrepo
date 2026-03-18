@@ -110,6 +110,21 @@ func TestApplySelectionConstraintsClearsFrontendOnlyManagedIntegrations(t *testi
 	}
 }
 
+func TestApplySelectionConstraintsClearsRecommendedSkillsWhenNoPackRequiresThem(t *testing.T) {
+	registry := catalog.MustDefaultRegistry()
+	input := createInput{
+		Mode:              string(catalog.ProjectModeBackend),
+		Backend:           string(catalog.PackIDGin),
+		RecommendedSkills: true,
+	}
+
+	applySelectionConstraints(registry, &input)
+
+	if input.RecommendedSkills {
+		t.Fatal("expected recommended skills to be cleared when no selected pack declares them")
+	}
+}
+
 func TestSelectValueBeforeOptionsKeepsViewportOnSelectedOption(t *testing.T) {
 	value := string(catalog.DatabasePostgres)
 	field := huh.NewSelect[string]().

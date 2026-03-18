@@ -1,0 +1,23 @@
+{{- if or (eq .Database "postgres") (eq .Database "supabase") }}
+import { drizzle } from "drizzle-orm/postgres-js";
+{{- else if eq .Database "sqlite" }}
+import { drizzle } from "drizzle-orm/better-sqlite3";
+{{- end }}
+
+import * as schema from "./schema";
+
+{{- if or (eq .Database "postgres") (eq .Database "supabase") }}
+export const getDb = (connectionString = process.env.DATABASE_URL ?? "") => {
+  return drizzle(connectionString, { schema });
+};
+{{- else if eq .Database "sqlite" }}
+export const getDb = (connectionString = process.env.DATABASE_URL ?? "./app.db") => {
+  return drizzle(connectionString, { schema });
+};
+{{- else }}
+export const getDb = () => {
+  return null;
+};
+{{- end }}
+
+export type DrizzleClient = ReturnType<typeof getDb>;

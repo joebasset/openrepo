@@ -1,0 +1,10 @@
+import { drizzle } from "drizzle-orm/d1";
+
+import type { WorkerBindings } from "../lib/env";
+import * as schema from "./schema";
+
+export const getDb = (d1: WorkerBindings["DB"]) => {
+  return drizzle(d1, { schema });
+};
+
+export type DrizzleClient = ReturnType<typeof getDb>;

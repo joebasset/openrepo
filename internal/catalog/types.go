@@ -139,6 +139,10 @@ type SkillRequirement struct {
 	InstallHint string
 }
 
+type SkillAssetBundle struct {
+	Path string
+}
+
 type ExternalCommand struct {
 	PackageManager PackageManager
 	Args           []string
@@ -178,6 +182,7 @@ type Pack struct {
 	Scripts        []Script
 	AgentRules     []AgentRule
 	RequiredSkills []SkillRequirement
+	SkillAssets    *SkillAssetBundle
 	Capabilities   PackCapabilities
 	External       *ExternalScaffold
 	Local          *LocalTemplate

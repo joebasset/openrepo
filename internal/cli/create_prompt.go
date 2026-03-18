@@ -13,53 +13,57 @@ import (
 )
 
 type commandFlagState struct {
-	gitInitSet bool
-	installSet bool
+	gitInitSet           bool
+	installSet           bool
+	recommendedSkillsSet bool
 }
 
 type reviewAction string
 
 const (
-	reviewActionCreate         reviewAction = "create"
-	reviewActionMode           reviewAction = "mode"
-	reviewActionFrontend       reviewAction = "frontend"
-	reviewActionBackend        reviewAction = "backend"
-	reviewActionPackageManager reviewAction = "package-manager"
-	reviewActionAuth           reviewAction = "auth"
-	reviewActionDatabase       reviewAction = "database"
-	reviewActionStorage        reviewAction = "storage"
-	reviewActionEmail          reviewAction = "email"
-	reviewActionGitInit        reviewAction = "git-init"
-	reviewActionInstall        reviewAction = "install"
+	reviewActionCreate            reviewAction = "create"
+	reviewActionMode              reviewAction = "mode"
+	reviewActionFrontend          reviewAction = "frontend"
+	reviewActionBackend           reviewAction = "backend"
+	reviewActionPackageManager    reviewAction = "package-manager"
+	reviewActionAuth              reviewAction = "auth"
+	reviewActionDatabase          reviewAction = "database"
+	reviewActionStorage           reviewAction = "storage"
+	reviewActionEmail             reviewAction = "email"
+	reviewActionGitInit           reviewAction = "git-init"
+	reviewActionInstall           reviewAction = "install"
+	reviewActionRecommendedSkills reviewAction = "recommended-skills"
 )
 
 type createInput struct {
-	ProjectName    string
-	Mode           string
-	Frontend       string
-	Backend        string
-	PackageManager string
-	Database       string
-	Auth           string
-	Storage        string
-	Email          string
-	GitInit        bool
-	Install        bool
+	ProjectName       string
+	Mode              string
+	Frontend          string
+	Backend           string
+	PackageManager    string
+	Database          string
+	Auth              string
+	Storage           string
+	Email             string
+	GitInit           bool
+	Install           bool
+	RecommendedSkills bool
 }
 
 func newCreateInput(options createOptions) createInput {
 	return createInput{
-		ProjectName:    strings.TrimSpace(options.projectName),
-		Mode:           normalizeValue(options.mode),
-		Frontend:       normalizeValue(options.frontend),
-		Backend:        normalizeValue(options.backend),
-		PackageManager: normalizeValue(options.packageManager),
-		Database:       normalizeValue(options.database),
-		Auth:           normalizeValue(options.auth),
-		Storage:        normalizeValue(options.storage),
-		Email:          normalizeValue(options.email),
-		GitInit:        options.gitInit,
-		Install:        options.install,
+		ProjectName:       strings.TrimSpace(options.projectName),
+		Mode:              normalizeValue(options.mode),
+		Frontend:          normalizeValue(options.frontend),
+		Backend:           normalizeValue(options.backend),
+		PackageManager:    normalizeValue(options.packageManager),
+		Database:          normalizeValue(options.database),
+		Auth:              normalizeValue(options.auth),
+		Storage:           normalizeValue(options.storage),
+		Email:             normalizeValue(options.email),
+		GitInit:           options.gitInit,
+		Install:           options.install,
+		RecommendedSkills: options.recommendedSkills,
 	}
 }
 
@@ -69,8 +73,9 @@ func promptForMissingValues(cmd *cobra.Command, registry catalog.Registry, input
 	}
 
 	reviewFlagState := commandFlagState{
-		gitInitSet: true,
-		installSet: true,
+		gitInitSet:           true,
+		installSet:           true,
+		recommendedSkillsSet: true,
 	}
 
 	for {
@@ -92,6 +97,13 @@ func promptForMissingValues(cmd *cobra.Command, registry catalog.Registry, input
 
 		if action == reviewActionInstall {
 			if err := promptInstall(cmd, input); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if action == reviewActionRecommendedSkills {
+			if err := promptRecommendedSkills(cmd, registry, input); err != nil {
 				return err
 			}
 			continue
@@ -388,6 +400,16 @@ func hasCapability(packs []catalog.Pack, supports func(pack catalog.Pack) bool) 
 	return false
 }
 
+func hasRecommendedSkills(packs []catalog.Pack) bool {
+	for _, pack := range packs {
+		if pack.SkillAssets != nil {
+			return true
+		}
+	}
+
+	return false
+}
+
 func requiresFrontendPack(mode string) bool {
 	return mode == string(catalog.ProjectModeFrontend) || mode == string(catalog.ProjectModeFullStack)
 }
@@ -576,6 +598,13 @@ func promptSelectionSteps(cmd *cobra.Command, registry catalog.Registry, input *
 		}
 	}
 
+	if !flagState.recommendedSkillsSet && hasRecommendedSkills(selectedPacks(registry, *input)) {
+		input.RecommendedSkills = true
+		if err := promptRecommendedSkills(cmd, registry, input); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -623,6 +652,9 @@ func reviewOptions(registry catalog.Registry, input createInput) []huh.Option[st
 	if len(emailPromptOptions(registry, input)) > 1 {
 		options = append(options, huh.NewOption("Change email ("+displayValue(input.Email, "none")+")", string(reviewActionEmail)))
 	}
+	if hasRecommendedSkills(selectedPacks(registry, input)) || input.RecommendedSkills {
+		options = append(options, huh.NewOption("Change recommended skills ("+boolLabel(input.RecommendedSkills)+")", string(reviewActionRecommendedSkills)))
+	}
 
 	return options
 }
@@ -659,7 +691,7 @@ func resetInputForReview(input *createInput, action reviewAction) {
 		input.Storage = ""
 	case reviewActionEmail:
 		input.Email = ""
-	case reviewActionGitInit, reviewActionInstall:
+	case reviewActionGitInit, reviewActionInstall, reviewActionRecommendedSkills:
 	}
 }
 
@@ -696,6 +728,20 @@ func promptInstall(cmd *cobra.Command, input *createInput) error {
 	field := huh.NewConfirm().
 		Title("Install dependencies?").
 		Value(&input.Install)
+
+	return runPromptForm(cmd, field)
+}
+
+func promptRecommendedSkills(cmd *cobra.Command, registry catalog.Registry, input *createInput) error {
+	if !hasRecommendedSkills(selectedPacks(registry, *input)) {
+		input.RecommendedSkills = false
+		return nil
+	}
+
+	field := huh.NewConfirm().
+		Title("Copy recommended skills?").
+		Description("Copy pack-specific Codex skill bundles into .agents/skills.").
+		Value(&input.RecommendedSkills)
 
 	return runPromptForm(cmd, field)
 }
@@ -744,8 +790,9 @@ func (input createInput) toSpec() (resolver.ProjectSpec, createSelections, error
 	}
 
 	selections := createSelections{
-		InitializeGit:       input.GitInit,
-		InstallDependencies: input.Install,
+		InitializeGit:            input.GitInit,
+		InstallDependencies:      input.Install,
+		IncludeRecommendedSkills: input.RecommendedSkills,
 	}
 
 	return spec, selections, nil
@@ -846,6 +893,10 @@ func applyDerivedDefaults(registry catalog.Registry, input *createInput) {
 	}
 
 	applyWorkersLockedDefaults(input)
+
+	if !hasRecommendedSkills(selectedPacks(registry, *input)) {
+		input.RecommendedSkills = false
+	}
 }
 
 func applySelectionConstraints(registry catalog.Registry, input *createInput) {
@@ -887,6 +938,10 @@ func applySelectionConstraints(registry catalog.Registry, input *createInput) {
 
 	if !optionValuesContain(emailPromptOptions(registry, *input), input.Email) {
 		input.Email = ""
+	}
+
+	if !hasRecommendedSkills(selectedPacks(registry, *input)) {
+		input.RecommendedSkills = false
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,10 +20,11 @@ import (
 )
 
 type Options struct {
-	TargetDir           string
-	InitializeGit       bool
-	InstallDependencies bool
-	DevMode             bool
+	TargetDir                string
+	InitializeGit            bool
+	InstallDependencies      bool
+	IncludeRecommendedSkills bool
+	DevMode                  bool
 }
 
 type Result struct {
@@ -34,6 +36,8 @@ type templateData struct {
 	ProjectName string
 	ProjectSlug string
 	ModulePath  string
+	Runtime     string
+	Database    string
 }
 
 func Generate(spec resolver.ProjectSpec, plan resolver.ResolvedPlan, registry catalog.Registry, options Options) (Result, error) {
@@ -58,7 +62,7 @@ func Generate(spec resolver.ProjectSpec, plan resolver.ResolvedPlan, registry ca
 		return Result{}, err
 	}
 
-	if err := writeRootFiles(options.TargetDir, spec, plan, packs); err != nil {
+	if err := writeRootFiles(options.TargetDir, spec, plan, packs, options); err != nil {
 		return Result{}, err
 	}
 
@@ -144,10 +148,11 @@ func prepareTargetDir(targetDir string, devMode bool) error {
 
 func createProjectDirectories(targetDir string, plan resolver.ResolvedPlan, packs []catalog.Pack) error {
 	directories := map[string]struct{}{
-		targetDir:                            {},
-		filepath.Join(targetDir, "apps"):     {},
-		filepath.Join(targetDir, "packages"): {},
-		filepath.Join(targetDir, ".agents"):  {},
+		targetDir:                                     {},
+		filepath.Join(targetDir, "apps"):              {},
+		filepath.Join(targetDir, "packages"):          {},
+		filepath.Join(targetDir, ".agents"):           {},
+		filepath.Join(targetDir, ".agents", "skills"): {},
 	}
 
 	for _, pack := range packs {
@@ -180,7 +185,7 @@ func createProjectDirectories(targetDir string, plan resolver.ResolvedPlan, pack
 	return nil
 }
 
-func writeRootFiles(targetDir string, spec resolver.ProjectSpec, plan resolver.ResolvedPlan, packs []catalog.Pack) error {
+func writeRootFiles(targetDir string, spec resolver.ProjectSpec, plan resolver.ResolvedPlan, packs []catalog.Pack, options Options) error {
 	rootFiles := []struct {
 		path           string
 		contents       string
@@ -189,8 +194,7 @@ func writeRootFiles(targetDir string, spec resolver.ProjectSpec, plan resolver.R
 		{path: filepath.Join(targetDir, "README.md"), contents: renderRootReadme(spec, plan, packs)},
 		{path: filepath.Join(targetDir, ".gitignore"), contents: renderGitignore(plan)},
 		{path: filepath.Join(targetDir, ".env.example"), contents: renderRootEnvExample(spec, packs)},
-		{path: filepath.Join(targetDir, "AGENTS.md"), contents: renderRootAgentsFile(spec, plan, packs), writeIfMissing: true},
-		{path: filepath.Join(targetDir, ".agents", "skills.md"), contents: renderSkillsFile(packs), writeIfMissing: true},
+		{path: filepath.Join(targetDir, "AGENTS.md"), contents: renderRootAgentsFile(spec, plan, packs, options.IncludeRecommendedSkills), writeIfMissing: true},
 	}
 
 	if hasTypeScriptPack(packs) {
@@ -249,6 +253,16 @@ func writeRootFiles(targetDir string, spec resolver.ProjectSpec, plan resolver.R
 		}
 	}
 
+	if err := clearGeneratedSkillAssets(targetDir, packs); err != nil {
+		return err
+	}
+
+	if options.IncludeRecommendedSkills {
+		if err := writeRecommendedSkillAssets(targetDir, packs); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -258,6 +272,8 @@ func scaffoldPacks(targetDir string, spec resolver.ProjectSpec, packs []catalog.
 			ProjectName: spec.ProjectName,
 			ProjectSlug: projectSlug(spec.ProjectName),
 			ModulePath:  goModulePath(spec.ProjectName, pack.OutputDir),
+			Runtime:     string(pack.Runtime),
+			Database:    string(spec.Database),
 		}
 
 		if pack.Strategy == catalog.PackStrategyExternalScaffold {
@@ -636,7 +652,7 @@ func renderRootEnvExample(spec resolver.ProjectSpec, packs []catalog.Pack) strin
 	return builder.String()
 }
 
-func renderRootAgentsFile(spec resolver.ProjectSpec, plan resolver.ResolvedPlan, packs []catalog.Pack) string {
+func renderRootAgentsFile(spec resolver.ProjectSpec, plan resolver.ResolvedPlan, packs []catalog.Pack, includeRecommendedSkills bool) string {
 	builder := &strings.Builder{}
 	builder.WriteString("# AGENTS.md\n\n")
 	builder.WriteString("## Project\n\n")
@@ -678,51 +694,90 @@ func renderRootAgentsFile(spec resolver.ProjectSpec, plan resolver.ResolvedPlan,
 	}
 
 	builder.WriteString("\n## Skills\n\n")
-	builder.WriteString("See `.agents/skills.md` for the recommended skill installs.\n")
+	if includeRecommendedSkills {
+		builder.WriteString("The recommended Codex skills for this scaffold have been copied into `.agents/skills/`.\n")
+	} else {
+		builder.WriteString("Use `.agents/skills/` for optional project-specific skill bundles when you choose to add them.\n")
+	}
 
 	return builder.String()
 }
 
-func renderSkillsFile(packs []catalog.Pack) string {
-	type skillEntry struct {
-		Name        string
-		InstallHint string
-	}
-
-	entries := make([]skillEntry, 0)
-	seen := make(map[string]struct{})
-
+func clearGeneratedSkillAssets(targetDir string, packs []catalog.Pack) error {
 	for _, pack := range packs {
-		for _, skill := range pack.RequiredSkills {
-			if _, ok := seen[skill.Name]; ok {
+		if pack.SkillAssets == nil {
+			continue
+		}
+
+		entries, err := fs.ReadDir(templates.Assets, pack.SkillAssets.Path)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
-			seen[skill.Name] = struct{}{}
-			entries = append(entries, skillEntry{Name: skill.Name, InstallHint: skill.InstallHint})
+			return fmt.Errorf("read skill asset bundle %q: %w", pack.SkillAssets.Path, err)
+		}
+
+		for _, entry := range entries {
+			path := filepath.Join(targetDir, ".agents", "skills", entry.Name())
+			if err := os.RemoveAll(path); err != nil {
+				return fmt.Errorf("remove skill asset %q: %w", path, err)
+			}
 		}
 	}
 
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Name < entries[j].Name
+	return nil
+}
+
+func writeRecommendedSkillAssets(targetDir string, packs []catalog.Pack) error {
+	for _, pack := range packs {
+		if pack.SkillAssets == nil {
+			continue
+		}
+
+		if err := copySkillAssetBundle(pack.SkillAssets.Path, filepath.Join(targetDir, ".agents", "skills")); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func copySkillAssetBundle(assetPath string, targetDir string) error {
+	return fs.WalkDir(templates.Assets, assetPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return fmt.Errorf("walk skill asset path %q: %w", path, err)
+		}
+
+		relativePath, err := filepath.Rel(assetPath, path)
+		if err != nil {
+			return fmt.Errorf("compute relative skill asset path for %q: %w", path, err)
+		}
+		if relativePath == "." {
+			return nil
+		}
+
+		outputPath := filepath.Join(targetDir, filepath.FromSlash(relativePath))
+		if d.IsDir() {
+			if err := os.MkdirAll(outputPath, 0o755); err != nil {
+				return fmt.Errorf("create skill asset directory %q: %w", outputPath, err)
+			}
+			return nil
+		}
+
+		contents, err := templates.Assets.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read skill asset %q: %w", path, err)
+		}
+
+		if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+			return fmt.Errorf("create parent directory for skill asset %q: %w", outputPath, err)
+		}
+		if err := os.WriteFile(outputPath, contents, 0o644); err != nil {
+			return fmt.Errorf("write skill asset %q: %w", outputPath, err)
+		}
+
+		return nil
 	})
-
-	if len(entries) == 0 {
-		return "# Skills\n\nNo extra skill installs are required for this generated selection.\n"
-	}
-
-	builder := &strings.Builder{}
-	builder.WriteString("# Skills\n\n")
-	builder.WriteString("Install these skills in Codex before doing stack-specific work:\n\n")
-
-	for _, entry := range entries {
-		builder.WriteString("- `")
-		builder.WriteString(entry.Name)
-		builder.WriteString("`: `")
-		builder.WriteString(entry.InstallHint)
-		builder.WriteString("`\n")
-	}
-
-	return builder.String()
 }
 
 func renderPackEnvExample(pack catalog.Pack, spec resolver.ProjectSpec) string {
@@ -802,6 +857,7 @@ func renderPackAgentsFile(pack catalog.Pack, spec resolver.ProjectSpec) string {
 		builder.WriteString("\n## Cloudflare Setup\n\n")
 		builder.WriteString("- Use Wrangler bindings for D1, KV, and R2 instead of external REST APIs.\n")
 		builder.WriteString("- The generated wrangler.jsonc keeps shareable binding stubs so Wrangler can auto-provision and backfill IDs on first deploy.\n")
+		builder.WriteString("- Run `wrangler types` after Wrangler config changes so `worker-configuration.d.ts` stays aligned with your bindings.\n")
 		if spec.Database == catalog.DatabaseD1 {
 			builder.WriteString("- The generated Workers config assumes D1 is the primary database binding.\n")
 		}
@@ -966,8 +1022,9 @@ func integrationEnvVars(spec resolver.ProjectSpec) []catalog.EnvVar {
 		variables = append(variables, catalog.EnvVar{Name: "DATABASE_URL", Example: "sqlite:///./app.db", Required: true, Description: "Connection string for the local SQLite database."})
 	case catalog.DatabaseSupabase:
 		variables = append(variables,
-			catalog.EnvVar{Name: "SUPABASE_URL", Example: "https://your-project.supabase.co", Required: true, Description: "Supabase project URL."},
-			catalog.EnvVar{Name: "SUPABASE_ANON_KEY", Example: "your-anon-key", Required: true, Description: "Supabase anonymous client key."},
+			catalog.EnvVar{Name: "DATABASE_URL", Example: "postgres://postgres:postgres@db.your-project.supabase.co:5432/postgres", Required: true, Description: "Connection string for the Supabase Postgres database used by the backend."},
+			catalog.EnvVar{Name: "SUPABASE_URL", Example: "https://your-project.supabase.co", Required: false, Description: "Optional Supabase project URL for client or auth integrations."},
+			catalog.EnvVar{Name: "SUPABASE_ANON_KEY", Example: "your-anon-key", Required: false, Description: "Optional Supabase anonymous client key for client or auth integrations."},
 		)
 	}
 

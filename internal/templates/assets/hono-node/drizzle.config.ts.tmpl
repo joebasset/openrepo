@@ -1,0 +1,16 @@
+import { defineConfig } from "drizzle-kit";
+
+export default defineConfig({
+  dialect: "{{ if or (eq .Database "postgres") (eq .Database "supabase") }}postgresql{{ else }}sqlite{{ end }}",
+  schema: "./src/db/schema",
+  out: "./drizzle",
+{{- if or (eq .Database "postgres") (eq .Database "supabase") }}
+  dbCredentials: {
+    url: process.env.DATABASE_URL ?? "",
+  },
+{{- else if eq .Database "sqlite" }}
+  dbCredentials: {
+    url: process.env.DATABASE_URL ?? "./app.db",
+  },
+{{- end }}
+});

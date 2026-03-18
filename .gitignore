@@ -53,3 +53,6 @@ pkg/
 .agents
 plan.md
 AGENTS.md
+
+# Script working directories
+.tmp/

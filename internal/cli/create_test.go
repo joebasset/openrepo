@@ -156,6 +156,46 @@ func TestCreateCommandCreatesSnapshotFullstackProject(t *testing.T) {
 	}
 }
 
+func TestCreateCommandCopiesRecommendedSkillsWhenRequested(t *testing.T) {
+	outputDir := filepath.Join(t.TempDir(), "test-repo")
+
+	cmd := cli.NewRootCmd()
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{
+		"create",
+		"--no-interactive",
+		"--project-name", "test-repo",
+		"--mode", "fullstack",
+		"--frontend", "nextjs",
+		"--backend", "hono-workers",
+		"--recommended-skills",
+		"--git-init=false",
+		"--install=false",
+		"--output-dir", outputDir,
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected command to succeed, got %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "Recommended skills: true") {
+		t.Fatalf("expected output to mention recommended skills, got %q", output)
+	}
+
+	for _, path := range []string{
+		filepath.Join(outputDir, ".agents", "skills", "web-perf", "SKILL.md"),
+		filepath.Join(outputDir, ".agents", "skills", "wrangler", "SKILL.md"),
+		filepath.Join(outputDir, ".agents", "skills", "workers-best-practices", "SKILL.md"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected generated file %q to exist: %v", path, err)
+		}
+	}
+}
+
 func installFakeToolchain(t *testing.T) {
 	t.Helper()
 

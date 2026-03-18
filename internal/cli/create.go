@@ -14,24 +14,26 @@ import (
 )
 
 type createOptions struct {
-	projectName    string
-	mode           string
-	frontend       string
-	backend        string
-	packageManager string
-	database       string
-	auth           string
-	storage        string
-	email          string
-	outputDir      string
-	interactive    bool
-	gitInit        bool
-	install        bool
+	projectName       string
+	mode              string
+	frontend          string
+	backend           string
+	packageManager    string
+	database          string
+	auth              string
+	storage           string
+	email             string
+	outputDir         string
+	interactive       bool
+	gitInit           bool
+	install           bool
+	recommendedSkills bool
 }
 
 type createSelections struct {
-	InitializeGit       bool
-	InstallDependencies bool
+	InitializeGit            bool
+	InstallDependencies      bool
+	IncludeRecommendedSkills bool
 }
 
 func newCreateCmd() *cobra.Command {
@@ -51,8 +53,9 @@ func newCreateCmd() *cobra.Command {
 			}
 
 			flagState := commandFlagState{
-				gitInitSet: cmd.Flags().Changed("git-init"),
-				installSet: cmd.Flags().Changed("install"),
+				gitInitSet:           cmd.Flags().Changed("git-init"),
+				installSet:           cmd.Flags().Changed("install"),
+				recommendedSkillsSet: cmd.Flags().Changed("recommended-skills"),
 			}
 
 			return runCreate(cmd, *options, flagState)
@@ -71,6 +74,7 @@ func newCreateCmd() *cobra.Command {
 	createCmd.Flags().StringVar(&options.outputDir, "output-dir", "", "Output directory for the generated repository")
 	createCmd.Flags().BoolVar(&options.gitInit, "git-init", true, "Initialize git for the generated project")
 	createCmd.Flags().BoolVar(&options.install, "install", true, "Install dependencies after scaffolding")
+	createCmd.Flags().BoolVar(&options.recommendedSkills, "recommended-skills", false, "Copy recommended skill bundles into .agents/skills")
 	createCmd.Flags().BoolVar(&options.interactive, "interactive", true, "Prompt for any missing values with Huh")
 	createCmd.Flags().BoolVar(&noInteractive, "no-interactive", false, "Disable Huh prompts and require flags")
 
@@ -105,10 +109,11 @@ func runCreate(cmd *cobra.Command, options createOptions, flagState commandFlagS
 	}
 
 	result, err := generator.Generate(spec, plan, registry, generator.Options{
-		TargetDir:           targetDir,
-		InitializeGit:       selections.InitializeGit,
-		InstallDependencies: selections.InstallDependencies,
-		DevMode:             devMode,
+		TargetDir:                targetDir,
+		InitializeGit:            selections.InitializeGit,
+		InstallDependencies:      selections.InstallDependencies,
+		IncludeRecommendedSkills: selections.IncludeRecommendedSkills,
+		DevMode:                  devMode,
 	})
 	if err != nil {
 		cmd.Println(renderCreateSummary(spec, selections, plan, registry))
@@ -134,6 +139,7 @@ func renderCreateSummary(spec resolver.ProjectSpec, selections createSelections,
 		fmt.Sprintf("Workspace strategy: %s", plan.WorkspaceStrategy),
 		fmt.Sprintf("Initialize git: %t", selections.InitializeGit),
 		fmt.Sprintf("Install dependencies: %t", selections.InstallDependencies),
+		fmt.Sprintf("Recommended skills: %t", selections.IncludeRecommendedSkills),
 	}
 
 	if spec.FrontendPackID != "" {

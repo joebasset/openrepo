@@ -1,0 +1,17 @@
+{{- if or (eq .Database "postgres") (eq .Database "supabase") }}
+import { boolean, pgTable, serial, text } from "drizzle-orm/pg-core";
+
+export const todos = pgTable("todos", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  completed: boolean("completed").notNull().default(false),
+});
+{{- else }}
+import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+
+export const todos = sqliteTable("todos", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  title: text("title").notNull(),
+  completed: integer("completed", { mode: "boolean" }).notNull().default(false),
+});
+{{- end }}

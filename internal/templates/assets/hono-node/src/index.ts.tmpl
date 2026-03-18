@@ -1,0 +1,23 @@
+import { Hono } from "hono";
+
+import { getAppEnv, type AppEnv } from "./lib/env";
+
+const app = new Hono<AppEnv>({
+  strict: false,
+});
+
+app.get("/health", (context) => {
+  return context.json({ status: "ok" });
+});
+
+app.get("/meta", (_context) => {
+  const env = getAppEnv();
+
+  return Response.json({
+    service: "{{ .ProjectSlug }}-api",
+    environment: env.APP_ENV,
+    port: env.PORT,
+  });
+});
+
+export default app;

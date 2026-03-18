@@ -75,14 +75,78 @@ func TestGenerateCreatesSnapshotFullstackFiles(t *testing.T) {
 
 	assertFileContains(t, filepath.Join(targetDir, "biome.json"), "\"linter\"")
 	assertFileContains(t, filepath.Join(targetDir, "package.json"), "\"biome\"")
-	assertFileContains(t, filepath.Join(targetDir, "apps", "web", "package.json"), "\"@tanstack/react-query\"")
-	assertFileContains(t, filepath.Join(targetDir, "apps", "web", "package.json"), "\"react-hook-form\"")
 	assertFileContains(t, filepath.Join(targetDir, "apps", "web", "package.json"), "\"zod\"")
+	assertFileContains(t, filepath.Join(targetDir, "apps", "web", "src", "app", "page.tsx"), "Minimal Next.js baseline")
 	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "package.json"), "\"drizzle-orm\"")
 	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "wrangler.jsonc"), "\"staging\"")
 	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "wrangler.jsonc"), "\"production\"")
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "src", "db", "db.ts"), "drizzle-orm/d1")
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "src", "lib", "env.ts"), "type WorkerBindings = Pick<Env")
 	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "drizzle.config.ts"), "defineConfig")
 	assertFileContains(t, filepath.Join(targetDir, "packages", "shared-types", "package.json"), "\"@acme-platform/shared-types\"")
+	assertPathExists(t, filepath.Join(targetDir, ".agents", "skills"))
+	assertPathMissing(t, filepath.Join(targetDir, ".agents", "skills.md"))
+	assertPathMissing(t, filepath.Join(targetDir, ".agents", "skills", "web-perf"))
+}
+
+func TestGenerateCopiesRecommendedSkillsWhenRequested(t *testing.T) {
+	registry := catalog.MustDefaultRegistry()
+	spec := resolver.ProjectSpec{
+		ProjectName:    "Acme Platform",
+		Mode:           catalog.ProjectModeFullStack,
+		FrontendPackID: catalog.PackIDNextJS,
+		BackendPackID:  catalog.PackIDHonoWorkers,
+		PackageManager: catalog.PackageManagerPNPM,
+		Database:       catalog.DatabaseD1,
+		Storage:        catalog.StorageR2,
+	}
+
+	plan, err := resolver.Resolve(spec, registry)
+	if err != nil {
+		t.Fatalf("resolve returned error: %v", err)
+	}
+
+	targetDir := filepath.Join(t.TempDir(), "acme-platform")
+	_, err = generator.Generate(spec, plan, registry, generator.Options{
+		TargetDir:                targetDir,
+		IncludeRecommendedSkills: true,
+	})
+	if err != nil {
+		t.Fatalf("generate returned error: %v", err)
+	}
+
+	assertFileContains(t, filepath.Join(targetDir, ".agents", "skills", "web-perf", "SKILL.md"), "web performance")
+	assertFileContains(t, filepath.Join(targetDir, ".agents", "skills", "wrangler", "SKILL.md"), "Wrangler CLI")
+	assertFileContains(t, filepath.Join(targetDir, ".agents", "skills", "workers-best-practices", "references", "rules.md"), "compatibility_date")
+}
+
+func TestGenerateCreatesHonoNodeSnapshotWithDbStructure(t *testing.T) {
+	registry := catalog.MustDefaultRegistry()
+	spec := resolver.ProjectSpec{
+		ProjectName:    "Acme API",
+		Mode:           catalog.ProjectModeBackend,
+		BackendPackID:  catalog.PackIDHonoNode,
+		PackageManager: catalog.PackageManagerPNPM,
+		Database:       catalog.DatabasePostgres,
+	}
+
+	plan, err := resolver.Resolve(spec, registry)
+	if err != nil {
+		t.Fatalf("resolve returned error: %v", err)
+	}
+
+	targetDir := filepath.Join(t.TempDir(), "acme-api")
+	_, err = generator.Generate(spec, plan, registry, generator.Options{
+		TargetDir: targetDir,
+	})
+	if err != nil {
+		t.Fatalf("generate returned error: %v", err)
+	}
+
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "src", "server.ts"), "@hono/node-server")
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "src", "db", "db.ts"), "drizzle-orm/postgres-js")
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "src", "db", "schema", "todos.ts"), "pgTable")
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "drizzle.config.ts"), "postgresql")
 }
 
 func TestGenerateResetsDevModeOutputDirectory(t *testing.T) {
@@ -165,5 +229,21 @@ func assertFileContains(t *testing.T, path string, expected string) {
 
 	if !strings.Contains(string(contents), expected) {
 		t.Fatalf("expected file %q to contain %q, got %q", path, expected, string(contents))
+	}
+}
+
+func assertPathExists(t *testing.T, path string) {
+	t.Helper()
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected path %q to exist: %v", path, err)
+	}
+}
+
+func assertPathMissing(t *testing.T, path string) {
+	t.Helper()
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected path %q to be missing, got %v", path, err)
 	}
 }

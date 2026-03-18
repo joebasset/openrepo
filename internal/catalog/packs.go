@@ -20,19 +20,17 @@ func nextJSPack() Pack {
 		Runtime:     RuntimeNextJS,
 		OutputDir:   "apps/web",
 		Strategy:    PackStrategyLocalTemplate,
-		Description: "Web frontend built from an in-repo Next.js snapshot with query/form defaults.",
+		Description: "Web frontend built from an in-repo Next.js snapshot with a minimal App Router baseline.",
 		Files: []ManagedFile{
-			{Path: "apps/web/package.json", Role: FileRoleLocalTemplate, Description: "Next.js app manifest with default UI and testing dependencies.", AssetPath: "assets/nextjs/package.json.tmpl"},
+			{Path: "apps/web/package.json", Role: FileRoleLocalTemplate, Description: "Next.js app manifest with minimal app dependencies and tests.", AssetPath: "assets/nextjs/package.json.tmpl"},
 			{Path: "apps/web/tsconfig.json", Role: FileRoleLocalTemplate, Description: "TypeScript configuration for the Next.js app.", AssetPath: "assets/nextjs/tsconfig.json.tmpl"},
 			{Path: "apps/web/next-env.d.ts", Role: FileRoleLocalTemplate, Description: "Next.js environment typing shim.", AssetPath: "assets/nextjs/next-env.d.ts.tmpl"},
 			{Path: "apps/web/next.config.ts", Role: FileRoleLocalTemplate, Description: "Next.js runtime config.", AssetPath: "assets/nextjs/next.config.ts.tmpl"},
 			{Path: "apps/web/postcss.config.mjs", Role: FileRoleLocalTemplate, Description: "PostCSS config for Tailwind.", AssetPath: "assets/nextjs/postcss.config.mjs.tmpl"},
 			{Path: "apps/web/vitest.config.ts", Role: FileRoleLocalTemplate, Description: "Vitest config for the web app.", AssetPath: "assets/nextjs/vitest.config.ts.tmpl"},
-			{Path: "apps/web/src/app/layout.tsx", Role: FileRoleLocalTemplate, Description: "Root app layout with query providers.", AssetPath: "assets/nextjs/src/app/layout.tsx.tmpl"},
-			{Path: "apps/web/src/app/page.tsx", Role: FileRoleLocalTemplate, Description: "Default app entrypoint with a form/query example.", AssetPath: "assets/nextjs/src/app/page.tsx.tmpl"},
+			{Path: "apps/web/src/app/layout.tsx", Role: FileRoleLocalTemplate, Description: "Root app layout.", AssetPath: "assets/nextjs/src/app/layout.tsx.tmpl"},
+			{Path: "apps/web/src/app/page.tsx", Role: FileRoleLocalTemplate, Description: "Default app entrypoint with a lightweight starter page.", AssetPath: "assets/nextjs/src/app/page.tsx.tmpl"},
 			{Path: "apps/web/src/app/globals.css", Role: FileRoleLocalTemplate, Description: "Global Tailwind styles.", AssetPath: "assets/nextjs/src/app/globals.css.tmpl"},
-			{Path: "apps/web/src/components/providers.tsx", Role: FileRoleLocalTemplate, Description: "React Query provider setup.", AssetPath: "assets/nextjs/src/components/providers.tsx.tmpl"},
-			{Path: "apps/web/src/components/contact-form.tsx", Role: FileRoleLocalTemplate, Description: "React Hook Form + Zod example component.", AssetPath: "assets/nextjs/src/components/contact-form.tsx.tmpl"},
 			{Path: "apps/web/src/lib/env.ts", Role: FileRoleLocalTemplate, Description: "Shared env parsing with Zod.", AssetPath: "assets/nextjs/src/lib/env.ts.tmpl"},
 			{Path: "apps/web/src/lib/env.test.ts", Role: FileRoleLocalTemplate, Description: "Vitest smoke test for the web env parser.", AssetPath: "assets/nextjs/src/lib/env.test.ts.tmpl"},
 			{Path: "apps/web/.env.example", Role: FileRoleOverlay, Description: "App-level environment template for web configuration."},
@@ -54,8 +52,10 @@ func nextJSPack() Pack {
 			{Title: "Server Boundaries", Instruction: "Keep server-only code out of client components and isolate browser code behind explicit client entrypoints."},
 		},
 		RequiredSkills: []SkillRequirement{
-			{Name: "vercel-react-best-practices", InstallHint: "npx skills add vercel-react-best-practices"},
-			{Name: "vercel-composition-patterns", InstallHint: "npx skills add vercel-composition-patterns"},
+			{Name: "web-perf", InstallHint: "npx skills add web-perf"},
+		},
+		SkillAssets: &SkillAssetBundle{
+			Path: "assets/skills/nextjs",
 		},
 		Capabilities: PackCapabilities{
 			ProvidesServerRuntime: true,
@@ -112,9 +112,7 @@ func expoPack() Pack {
 			{Title: "Expo First", Instruction: "Use Expo-managed APIs before adding native modules or ejecting."},
 			{Title: "Platform Boundaries", Instruction: "Keep shared UI logic portable and isolate platform-specific behavior behind small adapters."},
 		},
-		RequiredSkills: []SkillRequirement{
-			{Name: "vercel-react-best-practices", InstallHint: "npx skills add vercel-react-best-practices"},
-		},
+		RequiredSkills: []SkillRequirement{},
 		Capabilities: PackCapabilities{
 			ProvidesServerRuntime: false,
 			UsesTypeScript:        true,
@@ -139,11 +137,21 @@ func honoNodePack() Pack {
 		Language:    LanguageTypeScript,
 		Runtime:     RuntimeNodeJS,
 		OutputDir:   "apps/api",
-		Strategy:    PackStrategyExternalScaffold,
-		Description: "TypeScript API powered by Hono on Node.js.",
+		Strategy:    PackStrategyLocalTemplate,
+		Description: "TypeScript API powered by Hono on Node.js with Drizzle and Vitest defaults.",
 		Files: []ManagedFile{
-			{Path: "apps/api/package.json", Role: FileRoleUpstreamGenerated, Description: "Hono package manifest generated by create-hono."},
-			{Path: "apps/api/src/index.ts", Role: FileRoleUpstreamGenerated, Description: "API entrypoint generated by create-hono."},
+			{Path: "apps/api/package.json", Role: FileRoleLocalTemplate, Description: "Node API manifest with Hono, Drizzle, and test defaults.", AssetPath: "assets/hono-node/package.json.tmpl"},
+			{Path: "apps/api/tsconfig.json", Role: FileRoleLocalTemplate, Description: "TypeScript configuration for the Node API.", AssetPath: "assets/hono-node/tsconfig.json.tmpl"},
+			{Path: "apps/api/vitest.config.ts", Role: FileRoleLocalTemplate, Description: "Vitest config for the Node API.", AssetPath: "assets/hono-node/vitest.config.ts.tmpl"},
+			{Path: "apps/api/src/index.ts", Role: FileRoleLocalTemplate, Description: "Hono app entrypoint.", AssetPath: "assets/hono-node/src/index.ts.tmpl"},
+			{Path: "apps/api/src/server.ts", Role: FileRoleLocalTemplate, Description: "Local Node server bootstrap.", AssetPath: "assets/hono-node/src/server.ts.tmpl"},
+			{Path: "apps/api/src/lib/env.ts", Role: FileRoleLocalTemplate, Description: "Zod env parser for the API runtime.", AssetPath: "assets/hono-node/src/lib/env.ts.tmpl"},
+			{Path: "apps/api/src/db/db.ts", Role: FileRoleLocalTemplate, Description: "Drizzle client bootstrap.", AssetPath: "assets/hono-node/src/db/db.ts.tmpl"},
+			{Path: "apps/api/src/db/schema/index.ts", Role: FileRoleLocalTemplate, Description: "Barrel file for Drizzle schema exports.", AssetPath: "assets/hono-node/src/db/schema/index.ts.tmpl"},
+			{Path: "apps/api/src/db/schema/todos.ts", Role: FileRoleLocalTemplate, Description: "Default Drizzle todo schema.", AssetPath: "assets/hono-node/src/db/schema/todos.ts.tmpl"},
+			{Path: "apps/api/src/db/seeders/index.ts", Role: FileRoleLocalTemplate, Description: "Starter seed entrypoint.", AssetPath: "assets/hono-node/src/db/seeders/index.ts.tmpl"},
+			{Path: "apps/api/drizzle.config.ts", Role: FileRoleLocalTemplate, Description: "Drizzle configuration for the Node API.", AssetPath: "assets/hono-node/drizzle.config.ts.tmpl"},
+			{Path: "apps/api/tests/health.test.ts", Role: FileRoleLocalTemplate, Description: "Vitest smoke test for the Hono app.", AssetPath: "assets/hono-node/tests/health.test.ts.tmpl"},
 			{Path: "apps/api/.env.example", Role: FileRoleOverlay, Description: "App-level environment template for API configuration."},
 			{Path: "apps/api/AGENTS.md", Role: FileRoleOverlay, Description: "Stack-specific agent instructions for Hono Node projects."},
 		},
@@ -180,6 +188,9 @@ func honoNodePack() Pack {
 				{PackageManager: PackageManagerYarn, Args: []string{"yarn", "create", "hono", "{{project_dir}}", "--template", "nodejs"}},
 			},
 		},
+		Local: &LocalTemplate{
+			TemplateRoot: "assets/hono-node",
+		},
 	}
 }
 
@@ -192,14 +203,17 @@ func honoWorkersPack() Pack {
 		Runtime:     RuntimeCloudflareWorkers,
 		OutputDir:   "apps/api",
 		Strategy:    PackStrategyLocalTemplate,
-		Description: "TypeScript API powered by Hono on Cloudflare Workers with Wrangler environment bindings.",
+		Description: "TypeScript API powered by Hono on Cloudflare Workers with generated Wrangler binding types.",
 		Files: []ManagedFile{
 			{Path: "apps/api/package.json", Role: FileRoleLocalTemplate, Description: "Workers package manifest with Hono, Zod, and Drizzle defaults.", AssetPath: "assets/hono-workers/package.json.tmpl"},
 			{Path: "apps/api/tsconfig.json", Role: FileRoleLocalTemplate, Description: "TypeScript configuration for the Workers API.", AssetPath: "assets/hono-workers/tsconfig.json.tmpl"},
 			{Path: "apps/api/vitest.config.ts", Role: FileRoleLocalTemplate, Description: "Vitest config for Workers unit tests.", AssetPath: "assets/hono-workers/vitest.config.ts.tmpl"},
 			{Path: "apps/api/src/index.ts", Role: FileRoleLocalTemplate, Description: "Workers entrypoint and Hono app.", AssetPath: "assets/hono-workers/src/index.ts.tmpl"},
 			{Path: "apps/api/src/lib/env.ts", Role: FileRoleLocalTemplate, Description: "Zod env parser for Worker configuration.", AssetPath: "assets/hono-workers/src/lib/env.ts.tmpl"},
-			{Path: "apps/api/src/db/schema.ts", Role: FileRoleLocalTemplate, Description: "Drizzle schema for the D1 database.", AssetPath: "assets/hono-workers/src/db/schema.ts.tmpl"},
+			{Path: "apps/api/src/db/db.ts", Role: FileRoleLocalTemplate, Description: "Drizzle client bootstrap for D1.", AssetPath: "assets/hono-workers/src/db/db.ts.tmpl"},
+			{Path: "apps/api/src/db/schema/index.ts", Role: FileRoleLocalTemplate, Description: "Barrel file for Drizzle schema exports.", AssetPath: "assets/hono-workers/src/db/schema/index.ts.tmpl"},
+			{Path: "apps/api/src/db/schema/todos.ts", Role: FileRoleLocalTemplate, Description: "Default Drizzle todo schema.", AssetPath: "assets/hono-workers/src/db/schema/todos.ts.tmpl"},
+			{Path: "apps/api/src/db/seeders/index.ts", Role: FileRoleLocalTemplate, Description: "Starter seed entrypoint.", AssetPath: "assets/hono-workers/src/db/seeders/index.ts.tmpl"},
 			{Path: "apps/api/drizzle.config.ts", Role: FileRoleLocalTemplate, Description: "Drizzle configuration for D1 migrations.", AssetPath: "assets/hono-workers/drizzle.config.ts.tmpl"},
 			{Path: "apps/api/tests/health.test.ts", Role: FileRoleLocalTemplate, Description: "Vitest smoke test for the Hono app.", AssetPath: "assets/hono-workers/tests/health.test.ts.tmpl"},
 			{Path: "apps/api/wrangler.jsonc", Role: FileRoleOverlay, Description: "Wrangler configuration for local and deployed Workers development."},
@@ -223,6 +237,9 @@ func honoWorkersPack() Pack {
 		RequiredSkills: []SkillRequirement{
 			{Name: "wrangler", InstallHint: "npx skills add wrangler"},
 			{Name: "workers-best-practices", InstallHint: "npx skills add workers-best-practices"},
+		},
+		SkillAssets: &SkillAssetBundle{
+			Path: "assets/skills/hono-workers",
 		},
 		Capabilities: PackCapabilities{
 			ProvidesServerRuntime: true,

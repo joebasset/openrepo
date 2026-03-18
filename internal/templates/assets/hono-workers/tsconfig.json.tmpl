@@ -6,7 +6,7 @@
     "strict": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "types": ["@cloudflare/workers-types", "vitest/globals"]
+    "types": ["./worker-configuration.d.ts", "vitest/globals"]
   },
-  "include": ["src", "tests", "drizzle.config.ts"]
+  "include": ["worker-configuration.d.ts", "src", "tests", "drizzle.config.ts"]
 }
