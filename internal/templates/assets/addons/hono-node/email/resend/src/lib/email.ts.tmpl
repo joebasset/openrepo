@@ -1,0 +1,25 @@
+import { Resend } from "resend";
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+export interface SendEmailOptions {
+  to: string | string[];
+  subject: string;
+  html: string;
+  from?: string;
+}
+
+export async function sendEmail(options: SendEmailOptions) {
+  const { data, error } = await resend.emails.send({
+    from: options.from ?? "noreply@example.com",
+    to: options.to,
+    subject: options.subject,
+    html: options.html,
+  });
+
+  if (error) {
+    throw new Error(`Failed to send email: ${error.message}`);
+  }
+
+  return data;
+}

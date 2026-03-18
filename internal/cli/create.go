@@ -81,7 +81,7 @@ Available stacks:
 	createCmd.Flags().StringVar(&options.packageManager, "package-manager", "", "JS package manager (npm, pnpm, bun, yarn)")
 	createCmd.Flags().StringVar(&options.database, "database", "", "Database (postgres, sqlite, supabase, d1)")
 	createCmd.Flags().StringVar(&options.auth, "auth", "", "Auth provider (better-auth, supabase-auth)")
-	createCmd.Flags().StringVar(&options.storage, "storage", "", "Object storage (r2, s3)")
+	createCmd.Flags().StringVar(&options.storage, "storage", "", "Object storage (r2, s3, supabase-storage)")
 	createCmd.Flags().StringVar(&options.email, "email", "", "Email provider (resend)")
 	createCmd.Flags().StringVar(&options.outputDir, "output-dir", "", "Output directory (default: ./<project-name>)")
 	createCmd.Flags().BoolVar(&options.gitInit, "git-init", true, "Initialize a git repository")
@@ -94,6 +94,7 @@ Available stacks:
 
 func runCreate(cmd *cobra.Command, options createOptions, flagState commandFlagState) error {
 	registry := catalog.MustDefaultRegistry()
+	addonRegistry := catalog.MustDefaultAddonRegistry()
 	input := newCreateInput(options)
 
 	if options.interactive {
@@ -119,7 +120,7 @@ func runCreate(cmd *cobra.Command, options createOptions, flagState commandFlagS
 		return err
 	}
 
-	result, err := generator.Generate(spec, plan, registry, generator.Options{
+	result, err := generator.Generate(spec, plan, registry, addonRegistry, generator.Options{
 		TargetDir:                targetDir,
 		InitializeGit:            selections.InitializeGit,
 		InstallDependencies:      selections.InstallDependencies,

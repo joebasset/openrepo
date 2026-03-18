@@ -83,9 +83,10 @@ const (
 type StorageOption string
 
 const (
-	StorageNone StorageOption = ""
-	StorageS3   StorageOption = "s3"
-	StorageR2   StorageOption = "r2"
+	StorageNone     StorageOption = ""
+	StorageS3       StorageOption = "s3"
+	StorageR2       StorageOption = "r2"
+	StorageSupabase StorageOption = "supabase-storage"
 )
 
 type EmailOption string
@@ -166,6 +167,7 @@ type PackCapabilities struct {
 	SupportsSupabaseAuth  bool
 	SupportsStorage       bool
 	SupportsEmail         bool
+	SupportsBackendMode   bool // frontend pack that can also serve as backend (e.g. Next.js API routes)
 }
 
 type Pack struct {
@@ -186,6 +188,47 @@ type Pack struct {
 	Capabilities   PackCapabilities
 	External       *ExternalScaffold
 	Local          *LocalTemplate
+}
+
+type IntegrationKind string
+
+const (
+	IntegrationAuth     IntegrationKind = "auth"
+	IntegrationDatabase IntegrationKind = "database"
+	IntegrationStorage  IntegrationKind = "storage"
+	IntegrationEmail    IntegrationKind = "email"
+)
+
+type AddonID string
+
+func NewAddonID(kind IntegrationKind, value string, packID PackID) AddonID {
+	return AddonID(string(kind) + ":" + value + ":" + string(packID))
+}
+
+type Addon struct {
+	ID               AddonID
+	Integration      IntegrationKind
+	IntegrationValue string
+	PackID           PackID
+	DisplayName      string
+	Files            []ManagedFile
+	Dependencies     map[string]string
+	DevDependencies  map[string]string
+	EnvVars          []EnvVar
+	AgentRules       []AgentRule
+	Scripts          map[string]string
+}
+
+func (p Pack) SupportsCategory(cat PackCategory) bool {
+	if p.Category == cat {
+		return true
+	}
+
+	if cat == PackCategoryBackend && p.Capabilities.SupportsBackendMode {
+		return true
+	}
+
+	return false
 }
 
 func (p Pack) AllowsPackageManager(manager PackageManager) bool {

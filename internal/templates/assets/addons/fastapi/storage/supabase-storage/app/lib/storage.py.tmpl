@@ -1,0 +1,26 @@
+import os
+
+from supabase import create_client
+
+_supabase = create_client(
+    os.environ.get("SUPABASE_URL", ""),
+    os.environ.get("SUPABASE_SERVICE_ROLE_KEY", ""),
+)
+
+BUCKET = os.environ.get("SUPABASE_STORAGE_BUCKET", "assets")
+
+
+def upload_file(path: str, body: bytes, content_type: str | None = None) -> None:
+    options = {"upsert": "true"}
+    if content_type:
+        options["content-type"] = content_type
+    _supabase.storage.from_(BUCKET).upload(path, body, file_options=options)
+
+
+def get_file_url(path: str) -> str:
+    response = _supabase.storage.from_(BUCKET).get_public_url(path)
+    return response
+
+
+def delete_file(path: str) -> None:
+    _supabase.storage.from_(BUCKET).remove([path])

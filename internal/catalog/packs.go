@@ -65,6 +65,7 @@ func nextJSPack() Pack {
 			SupportsSupabaseAuth:  true,
 			SupportsStorage:       true,
 			SupportsEmail:         true,
+			SupportsBackendMode:   true,
 		},
 		External: &ExternalScaffold{
 			Tool:                      "create-next-app",

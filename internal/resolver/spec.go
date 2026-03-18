@@ -81,7 +81,7 @@ func Validate(spec ProjectSpec, registry catalog.Registry) error {
 	if backendErr != nil {
 		validationErrors = append(validationErrors, backendErr.Error())
 	}
-	if backendSelected && backend.Category != catalog.PackCategoryBackend {
+	if backendSelected && !backend.SupportsCategory(catalog.PackCategoryBackend) {
 		validationErrors = append(validationErrors, fmt.Sprintf("pack %q is not a backend pack", spec.BackendPackID))
 	}
 
@@ -122,7 +122,7 @@ func Validate(spec ProjectSpec, registry catalog.Registry) error {
 	if frontendSelected {
 		packs = append(packs, frontend)
 	}
-	if backendSelected {
+	if backendSelected && spec.BackendPackID != spec.FrontendPackID {
 		packs = append(packs, backend)
 	}
 
@@ -191,7 +191,7 @@ func selectedPacks(spec ProjectSpec, registry catalog.Registry) []catalog.Pack {
 		packs = append(packs, registry.MustGet(spec.FrontendPackID))
 	}
 
-	if spec.BackendPackID != "" {
+	if spec.BackendPackID != "" && spec.BackendPackID != spec.FrontendPackID {
 		packs = append(packs, registry.MustGet(spec.BackendPackID))
 	}
 

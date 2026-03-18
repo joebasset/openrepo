@@ -38,9 +38,12 @@ type templateData struct {
 	ModulePath  string
 	Runtime     string
 	Database    string
+	Auth        string
+	Storage     string
+	Email       string
 }
 
-func Generate(spec resolver.ProjectSpec, plan resolver.ResolvedPlan, registry catalog.Registry, options Options) (Result, error) {
+func Generate(spec resolver.ProjectSpec, plan resolver.ResolvedPlan, registry catalog.Registry, addonRegistry catalog.AddonRegistry, options Options) (Result, error) {
 	if strings.TrimSpace(options.TargetDir) == "" {
 		return Result{}, errors.New("target directory is required")
 	}
@@ -62,11 +65,19 @@ func Generate(spec resolver.ProjectSpec, plan resolver.ResolvedPlan, registry ca
 		return Result{}, err
 	}
 
-	if err := writeRootFiles(options.TargetDir, spec, plan, packs, options); err != nil {
+	if err := scaffoldAddons(options.TargetDir, spec, packs, addonRegistry); err != nil {
 		return Result{}, err
 	}
 
-	if err := writePackOverlays(options.TargetDir, spec, packs); err != nil {
+	if err := mergeAddonDependencies(options.TargetDir, spec, packs, addonRegistry); err != nil {
+		return Result{}, err
+	}
+
+	if err := writeRootFiles(options.TargetDir, spec, plan, packs, addonRegistry, options); err != nil {
+		return Result{}, err
+	}
+
+	if err := writePackOverlays(options.TargetDir, spec, packs, addonRegistry); err != nil {
 		return Result{}, err
 	}
 
@@ -99,7 +110,7 @@ func selectedPacks(spec resolver.ProjectSpec, registry catalog.Registry) ([]cata
 		packs = append(packs, pack)
 	}
 
-	if spec.BackendPackID != "" {
+	if spec.BackendPackID != "" && spec.BackendPackID != spec.FrontendPackID {
 		pack, ok := registry.Get(spec.BackendPackID)
 		if !ok {
 			return nil, fmt.Errorf("unknown pack %q", spec.BackendPackID)
@@ -185,7 +196,7 @@ func createProjectDirectories(targetDir string, plan resolver.ResolvedPlan, pack
 	return nil
 }
 
-func writeRootFiles(targetDir string, spec resolver.ProjectSpec, plan resolver.ResolvedPlan, packs []catalog.Pack, options Options) error {
+func writeRootFiles(targetDir string, spec resolver.ProjectSpec, plan resolver.ResolvedPlan, packs []catalog.Pack, addonRegistry catalog.AddonRegistry, options Options) error {
 	rootFiles := []struct {
 		path           string
 		contents       string
@@ -193,7 +204,7 @@ func writeRootFiles(targetDir string, spec resolver.ProjectSpec, plan resolver.R
 	}{
 		{path: filepath.Join(targetDir, "README.md"), contents: renderRootReadme(spec, plan, packs)},
 		{path: filepath.Join(targetDir, ".gitignore"), contents: renderGitignore(plan)},
-		{path: filepath.Join(targetDir, ".env.example"), contents: renderRootEnvExample(spec, packs)},
+		{path: filepath.Join(targetDir, ".env.example"), contents: renderRootEnvExample(spec, packs, addonRegistry)},
 		{path: filepath.Join(targetDir, "AGENTS.md"), contents: renderRootAgentsFile(spec, plan, packs, options.IncludeRecommendedSkills), writeIfMissing: true},
 	}
 
@@ -268,13 +279,7 @@ func writeRootFiles(targetDir string, spec resolver.ProjectSpec, plan resolver.R
 
 func scaffoldPacks(targetDir string, spec resolver.ProjectSpec, packs []catalog.Pack) error {
 	for _, pack := range packs {
-		data := templateData{
-			ProjectName: spec.ProjectName,
-			ProjectSlug: projectSlug(spec.ProjectName),
-			ModulePath:  goModulePath(spec.ProjectName, pack.OutputDir),
-			Runtime:     string(pack.Runtime),
-			Database:    string(spec.Database),
-		}
+		data := packTemplateData(spec, pack)
 
 		if pack.Strategy == catalog.PackStrategyExternalScaffold {
 			if err := executeExternalScaffold(targetDir, spec, pack); err != nil {
@@ -302,8 +307,130 @@ func scaffoldPacks(targetDir string, spec resolver.ProjectSpec, packs []catalog.
 	return nil
 }
 
-func writePackOverlays(targetDir string, spec resolver.ProjectSpec, packs []catalog.Pack) error {
+func packTemplateData(spec resolver.ProjectSpec, pack catalog.Pack) templateData {
+	return templateData{
+		ProjectName: spec.ProjectName,
+		ProjectSlug: projectSlug(spec.ProjectName),
+		ModulePath:  goModulePath(spec.ProjectName, pack.OutputDir),
+		Runtime:     string(pack.Runtime),
+		Database:    string(spec.Database),
+		Auth:        string(spec.Auth),
+		Storage:     string(spec.Storage),
+		Email:       string(spec.Email),
+	}
+}
+
+func scaffoldAddons(targetDir string, spec resolver.ProjectSpec, packs []catalog.Pack, addonRegistry catalog.AddonRegistry) error {
 	for _, pack := range packs {
+		addons := addonRegistry.Resolve(pack.ID, spec.Auth, spec.Database, spec.Storage, spec.Email)
+		data := packTemplateData(spec, pack)
+
+		for _, addon := range addons {
+			for _, file := range addon.Files {
+				if file.Role != catalog.FileRoleLocalTemplate {
+					continue
+				}
+
+				outputPath := filepath.Join(targetDir, filepath.FromSlash(file.Path))
+				contents, err := renderTemplateAsset(file.AssetPath, data)
+				if err != nil {
+					return fmt.Errorf("render addon template %q for %s: %w", file.AssetPath, addon.DisplayName, err)
+				}
+				if err := writeFile(outputPath, contents); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func mergeAddonDependencies(targetDir string, spec resolver.ProjectSpec, packs []catalog.Pack, addonRegistry catalog.AddonRegistry) error {
+	for _, pack := range packs {
+		addons := addonRegistry.Resolve(pack.ID, spec.Auth, spec.Database, spec.Storage, spec.Email)
+		if len(addons) == 0 {
+			continue
+		}
+
+		hasDeps := false
+		for _, addon := range addons {
+			if len(addon.Dependencies) > 0 || len(addon.DevDependencies) > 0 || len(addon.Scripts) > 0 {
+				hasDeps = true
+				break
+			}
+		}
+		if !hasDeps {
+			continue
+		}
+
+		manifestPath := filepath.Join(targetDir, filepath.FromSlash(pack.OutputDir), "package.json")
+		if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
+			continue
+		}
+
+		if err := mergePackageJSONAddons(manifestPath, addons); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+type packageJSONShape struct {
+	Name            string            `json:"name"`
+	Private         bool              `json:"private"`
+	Type            string            `json:"type,omitempty"`
+	Scripts         map[string]string `json:"scripts,omitempty"`
+	Dependencies    map[string]string `json:"dependencies,omitempty"`
+	DevDependencies map[string]string `json:"devDependencies,omitempty"`
+}
+
+func mergePackageJSONAddons(path string, addons []catalog.Addon) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read manifest %q: %w", path, err)
+	}
+
+	var manifest packageJSONShape
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return fmt.Errorf("parse manifest %q: %w", path, err)
+	}
+
+	if manifest.Dependencies == nil {
+		manifest.Dependencies = make(map[string]string)
+	}
+	if manifest.DevDependencies == nil {
+		manifest.DevDependencies = make(map[string]string)
+	}
+	if manifest.Scripts == nil {
+		manifest.Scripts = make(map[string]string)
+	}
+
+	for _, addon := range addons {
+		for k, v := range addon.Dependencies {
+			manifest.Dependencies[k] = v
+		}
+		for k, v := range addon.DevDependencies {
+			manifest.DevDependencies[k] = v
+		}
+		for k, v := range addon.Scripts {
+			manifest.Scripts[k] = v
+		}
+	}
+
+	out, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("serialize manifest %q: %w", path, err)
+	}
+
+	return os.WriteFile(path, append(out, '\n'), 0o644)
+}
+
+func writePackOverlays(targetDir string, spec resolver.ProjectSpec, packs []catalog.Pack, addonRegistry catalog.AddonRegistry) error {
+	for _, pack := range packs {
+		addons := addonRegistry.Resolve(pack.ID, spec.Auth, spec.Database, spec.Storage, spec.Email)
+
 		for _, file := range pack.Files {
 			if file.Role != catalog.FileRoleOverlay {
 				continue
@@ -312,11 +439,11 @@ func writePackOverlays(targetDir string, spec resolver.ProjectSpec, packs []cata
 			outputPath := filepath.Join(targetDir, filepath.FromSlash(file.Path))
 			switch filepath.Base(file.Path) {
 			case ".env.example":
-				if err := writeFile(outputPath, renderPackEnvExample(pack, spec)); err != nil {
+				if err := writeFile(outputPath, renderPackEnvExample(pack, spec, addons)); err != nil {
 					return err
 				}
 			case "AGENTS.md":
-				if err := writeFile(outputPath, renderPackAgentsFile(pack, spec)); err != nil {
+				if err := writeFile(outputPath, renderPackAgentsFile(pack, spec, addons)); err != nil {
 					return err
 				}
 			case "wrangler.jsonc":
@@ -604,7 +731,7 @@ func renderGitignore(plan resolver.ResolvedPlan) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-func renderRootEnvExample(spec resolver.ProjectSpec, packs []catalog.Pack) string {
+func renderRootEnvExample(spec resolver.ProjectSpec, packs []catalog.Pack, addonRegistry catalog.AddonRegistry) string {
 	variables := make([]catalog.EnvVar, 0)
 	seen := make(map[string]struct{})
 
@@ -622,7 +749,7 @@ func renderRootEnvExample(spec resolver.ProjectSpec, packs []catalog.Pack) strin
 		appendVars(pack.EnvVars)
 	}
 
-	appendVars(integrationEnvVars(spec))
+	appendVars(integrationEnvVars(spec, packs, addonRegistry))
 
 	if len(variables) == 0 {
 		return "# No environment variables declared for this selection yet.\n"
@@ -778,8 +905,16 @@ func copySkillAssetBundle(assetPath string, targetDir string) error {
 	})
 }
 
-func renderPackEnvExample(pack catalog.Pack, spec resolver.ProjectSpec) string {
-	if len(pack.EnvVars) == 0 {
+func renderPackEnvExample(pack catalog.Pack, spec resolver.ProjectSpec, addons []catalog.Addon) string {
+	hasAddonVars := false
+	for _, addon := range addons {
+		if len(addon.EnvVars) > 0 {
+			hasAddonVars = true
+			break
+		}
+	}
+
+	if len(pack.EnvVars) == 0 && !hasAddonVars {
 		return "# No app-specific environment variables declared for this pack yet.\n"
 	}
 
@@ -812,10 +947,32 @@ func renderPackEnvExample(pack catalog.Pack, spec resolver.ProjectSpec) string {
 		builder.WriteString("# Keep the generated binding stubs if you want Wrangler to auto-provision them, or replace them with fixed IDs and names from an existing account.\n")
 	}
 
+	for _, addon := range addons {
+		if len(addon.EnvVars) == 0 {
+			continue
+		}
+
+		builder.WriteString("\n# ")
+		builder.WriteString(addon.DisplayName)
+		builder.WriteString("\n")
+		for _, variable := range addon.EnvVars {
+			builder.WriteString("\n# ")
+			builder.WriteString(variable.Description)
+			if variable.Required {
+				builder.WriteString(" (required)")
+			}
+			builder.WriteString("\n")
+			builder.WriteString(variable.Name)
+			builder.WriteString("=")
+			builder.WriteString(variable.Example)
+			builder.WriteString("\n")
+		}
+	}
+
 	return builder.String()
 }
 
-func renderPackAgentsFile(pack catalog.Pack, spec resolver.ProjectSpec) string {
+func renderPackAgentsFile(pack catalog.Pack, spec resolver.ProjectSpec, addons []catalog.Addon) string {
 	builder := &strings.Builder{}
 	builder.WriteString("# AGENTS.md\n\n")
 	builder.WriteString("## Stack\n\n")
@@ -858,6 +1015,27 @@ func renderPackAgentsFile(pack catalog.Pack, spec resolver.ProjectSpec) string {
 		builder.WriteString("- Run `wrangler types` after Wrangler config changes so `worker-configuration.d.ts` stays aligned with your bindings.\n")
 		if spec.Database == catalog.DatabaseD1 {
 			builder.WriteString("- The generated Workers config assumes D1 is the primary database binding.\n")
+		}
+	}
+
+	hasAddonRules := false
+	for _, addon := range addons {
+		if len(addon.AgentRules) > 0 {
+			hasAddonRules = true
+			break
+		}
+	}
+
+	if hasAddonRules {
+		builder.WriteString("\n## Integrations\n\n")
+		for _, addon := range addons {
+			for _, rule := range addon.AgentRules {
+				builder.WriteString("- ")
+				builder.WriteString(rule.Title)
+				builder.WriteString(": ")
+				builder.WriteString(rule.Instruction)
+				builder.WriteString("\n")
+			}
 		}
 	}
 
@@ -1010,9 +1188,11 @@ func renderMakefile(packs []catalog.Pack) string {
 	return builder.String()
 }
 
-func integrationEnvVars(spec resolver.ProjectSpec) []catalog.EnvVar {
+func integrationEnvVars(spec resolver.ProjectSpec, packs []catalog.Pack, addonRegistry catalog.AddonRegistry) []catalog.EnvVar {
 	var variables []catalog.EnvVar
 
+	// Database env vars are still spec-level since the base templates handle
+	// database branching via template conditionals rather than addons.
 	switch spec.Database {
 	case catalog.DatabasePostgres:
 		variables = append(variables, catalog.EnvVar{Name: "DATABASE_URL", Example: "postgres://postgres:postgres@localhost:5432/app", Required: true, Description: "Connection string for the primary Postgres database."})
@@ -1026,37 +1206,15 @@ func integrationEnvVars(spec resolver.ProjectSpec) []catalog.EnvVar {
 		)
 	}
 
-	switch spec.Auth {
-	case catalog.AuthBetter:
-		variables = append(variables,
-			catalog.EnvVar{Name: "BETTER_AUTH_SECRET", Example: "replace-me", Required: true, Description: "Application secret used by Better Auth."},
-			catalog.EnvVar{Name: "BETTER_AUTH_URL", Example: "http://localhost:3000", Required: true, Description: "Base URL used by Better Auth callbacks."},
-		)
-	case catalog.AuthSupabase:
-		variables = append(variables,
-			catalog.EnvVar{Name: "SUPABASE_URL", Example: "https://your-project.supabase.co", Required: true, Description: "Supabase project URL used for auth flows."},
-			catalog.EnvVar{Name: "SUPABASE_ANON_KEY", Example: "your-anon-key", Required: true, Description: "Supabase anonymous client key used for auth flows."},
-		)
-	}
-
-	switch spec.Storage {
-	case catalog.StorageR2:
-		variables = append(variables,
-			catalog.EnvVar{Name: "R2_BUCKET", Example: "app-assets", Required: true, Description: "Cloudflare R2 bucket name."},
-			catalog.EnvVar{Name: "R2_ACCESS_KEY_ID", Example: "your-access-key-id", Required: true, Description: "R2 access key id."},
-			catalog.EnvVar{Name: "R2_SECRET_ACCESS_KEY", Example: "your-secret-access-key", Required: true, Description: "R2 secret access key."},
-		)
-	case catalog.StorageS3:
-		variables = append(variables,
-			catalog.EnvVar{Name: "S3_BUCKET", Example: "app-assets", Required: true, Description: "Amazon S3 bucket name."},
-			catalog.EnvVar{Name: "S3_REGION", Example: "us-east-1", Required: true, Description: "Amazon S3 region."},
-			catalog.EnvVar{Name: "S3_ACCESS_KEY_ID", Example: "your-access-key-id", Required: true, Description: "Amazon S3 access key id."},
-			catalog.EnvVar{Name: "S3_SECRET_ACCESS_KEY", Example: "your-secret-access-key", Required: true, Description: "Amazon S3 secret access key."},
-		)
-	}
-
-	if spec.Email == catalog.EmailResend {
-		variables = append(variables, catalog.EnvVar{Name: "RESEND_API_KEY", Example: "re_xxx", Required: true, Description: "API key used to send email through Resend."})
+	// All other integration env vars come from addons.
+	for _, pack := range packs {
+		addons := addonRegistry.Resolve(pack.ID, spec.Auth, spec.Database, spec.Storage, spec.Email)
+		for _, addon := range addons {
+			if addon.Integration == catalog.IntegrationDatabase {
+				continue
+			}
+			variables = append(variables, addon.EnvVars...)
+		}
 	}
 
 	return variables

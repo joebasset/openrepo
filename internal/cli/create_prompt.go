@@ -135,7 +135,7 @@ func packOptions(registry catalog.Registry, category catalog.PackCategory, recom
 	var recommended *huh.Option[string]
 
 	for _, pack := range registry.All() {
-		if pack.Category != category {
+		if !pack.SupportsCategory(category) {
 			continue
 		}
 
@@ -257,6 +257,7 @@ func storagePromptOptions(registry catalog.Registry, input createInput) []huh.Op
 	options := []huh.Option[string]{
 		huh.NewOption("Cloudflare R2 (recommended)", string(catalog.StorageR2)),
 		huh.NewOption("Amazon S3", string(catalog.StorageS3)),
+		huh.NewOption("Supabase Storage", string(catalog.StorageSupabase)),
 	}
 
 	return append(options, huh.NewOption("None", ""))
@@ -851,6 +852,8 @@ func parseStorageOption(value string) (catalog.StorageOption, error) {
 		return catalog.StorageR2, nil
 	case string(catalog.StorageS3):
 		return catalog.StorageS3, nil
+	case string(catalog.StorageSupabase):
+		return catalog.StorageSupabase, nil
 	default:
 		return catalog.StorageNone, fmt.Errorf("unsupported storage option %q", value)
 	}

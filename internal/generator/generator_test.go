@@ -13,6 +13,7 @@ import (
 
 func TestGenerateCreatesFastAPIProjectFiles(t *testing.T) {
 	registry := catalog.MustDefaultRegistry()
+	addonRegistry := catalog.MustDefaultAddonRegistry()
 	spec := resolver.ProjectSpec{
 		ProjectName:   "Acme Platform",
 		Mode:          catalog.ProjectModeBackend,
@@ -28,7 +29,7 @@ func TestGenerateCreatesFastAPIProjectFiles(t *testing.T) {
 	}
 
 	targetDir := filepath.Join(t.TempDir(), "acme-platform")
-	result, err := generator.Generate(spec, plan, registry, generator.Options{TargetDir: targetDir})
+	result, err := generator.Generate(spec, plan, registry, addonRegistry, generator.Options{TargetDir: targetDir})
 	if err != nil {
 		t.Fatalf("generate returned error: %v", err)
 	}
@@ -48,6 +49,7 @@ func TestGenerateCreatesFastAPIProjectFiles(t *testing.T) {
 
 func TestGenerateCreatesSnapshotFullstackFiles(t *testing.T) {
 	registry := catalog.MustDefaultRegistry()
+	addonRegistry := catalog.MustDefaultAddonRegistry()
 	spec := resolver.ProjectSpec{
 		ProjectName:    "Acme Platform",
 		Mode:           catalog.ProjectModeFullStack,
@@ -65,7 +67,7 @@ func TestGenerateCreatesSnapshotFullstackFiles(t *testing.T) {
 	}
 
 	targetDir := filepath.Join(t.TempDir(), "acme-platform")
-	_, err = generator.Generate(spec, plan, registry, generator.Options{
+	_, err = generator.Generate(spec, plan, registry, addonRegistry, generator.Options{
 		TargetDir:           targetDir,
 		InstallDependencies: false,
 	})
@@ -91,6 +93,7 @@ func TestGenerateCreatesSnapshotFullstackFiles(t *testing.T) {
 
 func TestGenerateCopiesRecommendedSkillsWhenRequested(t *testing.T) {
 	registry := catalog.MustDefaultRegistry()
+	addonRegistry := catalog.MustDefaultAddonRegistry()
 	spec := resolver.ProjectSpec{
 		ProjectName:    "Acme Platform",
 		Mode:           catalog.ProjectModeFullStack,
@@ -107,7 +110,7 @@ func TestGenerateCopiesRecommendedSkillsWhenRequested(t *testing.T) {
 	}
 
 	targetDir := filepath.Join(t.TempDir(), "acme-platform")
-	_, err = generator.Generate(spec, plan, registry, generator.Options{
+	_, err = generator.Generate(spec, plan, registry, addonRegistry, generator.Options{
 		TargetDir:                targetDir,
 		IncludeRecommendedSkills: true,
 	})
@@ -122,6 +125,7 @@ func TestGenerateCopiesRecommendedSkillsWhenRequested(t *testing.T) {
 
 func TestGenerateCreatesHonoNodeSnapshotWithDbStructure(t *testing.T) {
 	registry := catalog.MustDefaultRegistry()
+	addonRegistry := catalog.MustDefaultAddonRegistry()
 	spec := resolver.ProjectSpec{
 		ProjectName:    "Acme API",
 		Mode:           catalog.ProjectModeBackend,
@@ -136,7 +140,7 @@ func TestGenerateCreatesHonoNodeSnapshotWithDbStructure(t *testing.T) {
 	}
 
 	targetDir := filepath.Join(t.TempDir(), "acme-api")
-	_, err = generator.Generate(spec, plan, registry, generator.Options{
+	_, err = generator.Generate(spec, plan, registry, addonRegistry, generator.Options{
 		TargetDir: targetDir,
 	})
 	if err != nil {
@@ -151,6 +155,7 @@ func TestGenerateCreatesHonoNodeSnapshotWithDbStructure(t *testing.T) {
 
 func TestGenerateResetsDevModeOutputDirectory(t *testing.T) {
 	registry := catalog.MustDefaultRegistry()
+	addonRegistry := catalog.MustDefaultAddonRegistry()
 	spec := resolver.ProjectSpec{
 		ProjectName:   "acme",
 		Mode:          catalog.ProjectModeBackend,
@@ -171,7 +176,7 @@ func TestGenerateResetsDevModeOutputDirectory(t *testing.T) {
 		t.Fatalf("write stale file: %v", err)
 	}
 
-	_, err = generator.Generate(spec, plan, registry, generator.Options{
+	_, err = generator.Generate(spec, plan, registry, addonRegistry, generator.Options{
 		TargetDir: targetDir,
 		DevMode:   true,
 	})
@@ -190,6 +195,7 @@ func TestGenerateResetsDevModeOutputDirectory(t *testing.T) {
 
 func TestGenerateRejectsUnexpectedFilesInTargetDirectory(t *testing.T) {
 	registry := catalog.MustDefaultRegistry()
+	addonRegistry := catalog.MustDefaultAddonRegistry()
 	spec := resolver.ProjectSpec{
 		ProjectName:   "acme",
 		Mode:          catalog.ProjectModeBackend,
@@ -209,7 +215,7 @@ func TestGenerateRejectsUnexpectedFilesInTargetDirectory(t *testing.T) {
 		t.Fatalf("write existing file: %v", err)
 	}
 
-	_, err = generator.Generate(spec, plan, registry, generator.Options{TargetDir: targetDir})
+	_, err = generator.Generate(spec, plan, registry, addonRegistry, generator.Options{TargetDir: targetDir})
 	if err == nil {
 		t.Fatal("expected generate to reject non-empty target directory")
 	}
@@ -217,6 +223,87 @@ func TestGenerateRejectsUnexpectedFilesInTargetDirectory(t *testing.T) {
 	if !strings.Contains(err.Error(), "must be empty or contain only .agents and AGENTS.md") {
 		t.Fatalf("expected target directory error, got %v", err)
 	}
+}
+
+func TestGenerateAppliesAddonFilesAndDependencies(t *testing.T) {
+	registry := catalog.MustDefaultRegistry()
+	addonRegistry := catalog.MustDefaultAddonRegistry()
+	spec := resolver.ProjectSpec{
+		ProjectName:    "Acme API",
+		Mode:           catalog.ProjectModeBackend,
+		BackendPackID:  catalog.PackIDHonoNode,
+		PackageManager: catalog.PackageManagerPNPM,
+		Database:       catalog.DatabasePostgres,
+		Auth:           catalog.AuthBetter,
+		Storage:        catalog.StorageS3,
+		Email:          catalog.EmailResend,
+	}
+
+	plan, err := resolver.Resolve(spec, registry)
+	if err != nil {
+		t.Fatalf("resolve returned error: %v", err)
+	}
+
+	targetDir := filepath.Join(t.TempDir(), "acme-api")
+	_, err = generator.Generate(spec, plan, registry, addonRegistry, generator.Options{
+		TargetDir: targetDir,
+	})
+	if err != nil {
+		t.Fatalf("generate returned error: %v", err)
+	}
+
+	// Verify addon source files exist
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "src", "lib", "auth.ts"), "betterAuth")
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "src", "middleware", "auth.ts"), "requireAuth")
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "src", "routes", "auth.ts"), "auth.handler")
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "src", "db", "schema", "auth.ts"), "pgTable")
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "src", "lib", "storage.ts"), "S3Client")
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "src", "lib", "email.ts"), "Resend")
+
+	// Verify schema barrel was replaced by addon to include auth
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "src", "db", "schema", "index.ts"), "./auth")
+
+	// Verify addon dependencies were merged into package.json
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "package.json"), "better-auth")
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "package.json"), "@aws-sdk/client-s3")
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "package.json"), "resend")
+
+	// Verify addon env vars appear in root .env.example
+	assertFileContains(t, filepath.Join(targetDir, ".env.example"), "BETTER_AUTH_SECRET")
+	assertFileContains(t, filepath.Join(targetDir, ".env.example"), "S3_BUCKET")
+	assertFileContains(t, filepath.Join(targetDir, ".env.example"), "RESEND_API_KEY")
+
+	// Verify addon agent rules in pack AGENTS.md
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "AGENTS.md"), "Auth Sessions")
+}
+
+func TestGenerateAppliesAddonForFastAPI(t *testing.T) {
+	registry := catalog.MustDefaultRegistry()
+	addonRegistry := catalog.MustDefaultAddonRegistry()
+	spec := resolver.ProjectSpec{
+		ProjectName:   "Acme Platform",
+		Mode:          catalog.ProjectModeBackend,
+		BackendPackID: catalog.PackIDFastAPI,
+		Database:      catalog.DatabasePostgres,
+		Auth:          catalog.AuthSupabase,
+		Storage:       catalog.StorageS3,
+		Email:         catalog.EmailResend,
+	}
+
+	plan, err := resolver.Resolve(spec, registry)
+	if err != nil {
+		t.Fatalf("resolve returned error: %v", err)
+	}
+
+	targetDir := filepath.Join(t.TempDir(), "acme-platform")
+	_, err = generator.Generate(spec, plan, registry, addonRegistry, generator.Options{TargetDir: targetDir})
+	if err != nil {
+		t.Fatalf("generate returned error: %v", err)
+	}
+
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "app", "lib", "supabase.py"), "get_current_user")
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "app", "lib", "storage.py"), "boto3")
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "app", "lib", "email.py"), "resend")
 }
 
 func assertFileContains(t *testing.T, path string, expected string) {

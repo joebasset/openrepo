@@ -1,0 +1,28 @@
+import os
+from functools import lru_cache
+
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from supabase import Client, create_client
+
+security = HTTPBearer()
+
+
+@lru_cache
+def get_supabase_client() -> Client:
+    url = os.environ.get("SUPABASE_URL", "")
+    key = os.environ.get("SUPABASE_ANON_KEY", "")
+    return create_client(url, key)
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> dict:
+    client = get_supabase_client()
+    try:
+        response = client.auth.get_user(credentials.credentials)
+        return response.user.model_dump()
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+        )
