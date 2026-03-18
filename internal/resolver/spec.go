@@ -211,42 +211,28 @@ func getPack(registry catalog.Registry, id catalog.PackID) (catalog.Pack, bool, 
 	return pack, true, nil
 }
 
-func supportsBetterAuth(packs []catalog.Pack) bool {
+func hasCapability(packs []catalog.Pack, supports func(catalog.Pack) bool) bool {
 	for _, pack := range packs {
-		if pack.Capabilities.SupportsBetterAuth {
+		if supports(pack) {
 			return true
 		}
 	}
 
 	return false
+}
+
+func supportsBetterAuth(packs []catalog.Pack) bool {
+	return hasCapability(packs, func(p catalog.Pack) bool { return p.Capabilities.SupportsBetterAuth })
 }
 
 func supportsStorage(packs []catalog.Pack) bool {
-	for _, pack := range packs {
-		if pack.Capabilities.SupportsStorage {
-			return true
-		}
-	}
-
-	return false
+	return hasCapability(packs, func(p catalog.Pack) bool { return p.Capabilities.SupportsStorage })
 }
 
 func supportsEmail(packs []catalog.Pack) bool {
-	for _, pack := range packs {
-		if pack.Capabilities.SupportsEmail {
-			return true
-		}
-	}
-
-	return false
+	return hasCapability(packs, func(p catalog.Pack) bool { return p.Capabilities.SupportsEmail })
 }
 
 func supportsDatabase(packs []catalog.Pack) bool {
-	for _, pack := range packs {
-		if pack.Capabilities.SupportsDatabase {
-			return true
-		}
-	}
-
-	return false
+	return hasCapability(packs, func(p catalog.Pack) bool { return p.Capabilities.SupportsDatabase })
 }

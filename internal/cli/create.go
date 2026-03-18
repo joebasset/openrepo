@@ -47,6 +47,18 @@ func newCreateCmd() *cobra.Command {
 	createCmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new project",
+		Long: `Scaffold a new monorepo with frontend and/or backend stacks.
+
+By default the command runs interactively, prompting for any choices you
+don't supply via flags. Pass --no-interactive to skip prompts and require
+all values as flags.
+
+Available stacks:
+  Frontend: nextjs, expo
+  Backend:  hono-node, hono-workers, fastapi, gin`,
+		Example: `  openrepo create
+  openrepo create --project-name my-app --mode fullstack
+  openrepo create --project-name api --mode backend --backend hono-workers --no-interactive`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if noInteractive {
 				options.interactive = false
@@ -62,21 +74,20 @@ func newCreateCmd() *cobra.Command {
 		},
 	}
 
-	createCmd.Flags().StringVar(&options.projectName, "project-name", "", "Project name used for the generated repository")
-	createCmd.Flags().StringVar(&options.mode, "mode", "", "Project mode: frontend, backend, or fullstack")
-	createCmd.Flags().StringVar(&options.frontend, "frontend", "", "Frontend pack id")
-	createCmd.Flags().StringVar(&options.backend, "backend", "", "Backend pack id")
-	createCmd.Flags().StringVar(&options.packageManager, "package-manager", "", "JavaScript package manager")
-	createCmd.Flags().StringVar(&options.database, "database", "", "Database integration")
-	createCmd.Flags().StringVar(&options.auth, "auth", "", "Authentication integration")
-	createCmd.Flags().StringVar(&options.storage, "storage", "", "Storage integration")
-	createCmd.Flags().StringVar(&options.email, "email", "", "Email integration")
-	createCmd.Flags().StringVar(&options.outputDir, "output-dir", "", "Output directory for the generated repository")
-	createCmd.Flags().BoolVar(&options.gitInit, "git-init", true, "Initialize git for the generated project")
+	createCmd.Flags().StringVar(&options.projectName, "project-name", "", "Name for the generated repository")
+	createCmd.Flags().StringVar(&options.mode, "mode", "", "Project mode (frontend, backend, fullstack)")
+	createCmd.Flags().StringVar(&options.frontend, "frontend", "", "Frontend stack (nextjs, expo)")
+	createCmd.Flags().StringVar(&options.backend, "backend", "", "Backend stack (hono-node, hono-workers, fastapi, gin)")
+	createCmd.Flags().StringVar(&options.packageManager, "package-manager", "", "JS package manager (npm, pnpm, bun, yarn)")
+	createCmd.Flags().StringVar(&options.database, "database", "", "Database (postgres, sqlite, supabase, d1)")
+	createCmd.Flags().StringVar(&options.auth, "auth", "", "Auth provider (better-auth, supabase-auth)")
+	createCmd.Flags().StringVar(&options.storage, "storage", "", "Object storage (r2, s3)")
+	createCmd.Flags().StringVar(&options.email, "email", "", "Email provider (resend)")
+	createCmd.Flags().StringVar(&options.outputDir, "output-dir", "", "Output directory (default: ./<project-name>)")
+	createCmd.Flags().BoolVar(&options.gitInit, "git-init", true, "Initialize a git repository")
 	createCmd.Flags().BoolVar(&options.install, "install", true, "Install dependencies after scaffolding")
 	createCmd.Flags().BoolVar(&options.recommendedSkills, "recommended-skills", false, "Copy recommended skill bundles into .agents/skills")
-	createCmd.Flags().BoolVar(&options.interactive, "interactive", true, "Prompt for any missing values with Huh")
-	createCmd.Flags().BoolVar(&noInteractive, "no-interactive", false, "Disable Huh prompts and require flags")
+	createCmd.Flags().BoolVar(&noInteractive, "no-interactive", false, "Skip prompts and require all values as flags")
 
 	return createCmd
 }

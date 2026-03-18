@@ -4,10 +4,11 @@ import "github.com/spf13/cobra"
 
 func NewRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:           "openrepo",
-		Short:         "Scaffold opinionated monorepos with Cobra and Huh",
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		Use:                "openrepo",
+		Short:              "Scaffold fullstack monorepos",
+		SilenceUsage:       true,
+		SilenceErrors:      true,
+		CompletionOptions:  cobra.CompletionOptions{DisableDefaultCmd: true},
 	}
 
 	rootCmd.AddCommand(newCreateCmd())

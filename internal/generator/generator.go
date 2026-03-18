@@ -552,10 +552,8 @@ func renderRootReadme(spec resolver.ProjectSpec, plan resolver.ResolvedPlan, pac
 			builder.WriteString(runCommand)
 			builder.WriteString("`\n")
 		}
-	} else if makeCommand := "make test"; len(packs) > 0 {
-		builder.WriteString("- Root task runner: `")
-		builder.WriteString(makeCommand)
-		builder.WriteString("`\n")
+	} else {
+		builder.WriteString("- Root task runner: `make test`\n")
 	}
 
 	builder.WriteString("\n## Next Steps\n\n")
@@ -695,7 +693,7 @@ func renderRootAgentsFile(spec resolver.ProjectSpec, plan resolver.ResolvedPlan,
 
 	builder.WriteString("\n## Skills\n\n")
 	if includeRecommendedSkills {
-		builder.WriteString("The recommended Codex skills for this scaffold have been copied into `.agents/skills/`.\n")
+		builder.WriteString("The recommended skills for this scaffold have been copied into `.agents/skills/`.\n")
 	} else {
 		builder.WriteString("Use `.agents/skills/` for optional project-specific skill bundles when you choose to add them.\n")
 	}
@@ -1145,11 +1143,22 @@ func writeFile(path string, contents string) error {
 }
 
 func writeFileIfMissing(path string, contents string) error {
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("inspect existing file %q: %w", path, err)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create parent directory for %q: %w", path, err)
 	}
 
-	return writeFile(path, contents)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		if os.IsExist(err) {
+			return nil
+		}
+		return fmt.Errorf("create file %q: %w", path, err)
+	}
+	defer file.Close()
+
+	if _, err := file.WriteString(contents); err != nil {
+		return fmt.Errorf("write file %q: %w", path, err)
+	}
+
+	return nil
 }

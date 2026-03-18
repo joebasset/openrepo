@@ -118,54 +118,37 @@ func promptForMissingValues(cmd *cobra.Command, registry catalog.Registry, input
 }
 
 func frontendOptions(registry catalog.Registry) []huh.Option[string] {
-	options := make([]huh.Option[string], 0)
-	var recommended *huh.Option[string]
-
-	for _, pack := range registry.All() {
-		if pack.Category != catalog.PackCategoryFrontend {
-			continue
-		}
-
-		label := pack.DisplayName
-		if pack.ID == catalog.PackIDNextJS {
-			label += " (recommended)"
-		}
-
-		option := huh.NewOption(label, string(pack.ID))
-		if pack.ID == catalog.PackIDNextJS {
-			recommended = &option
-			continue
-		}
-
-		options = append(options, option)
-	}
-
-	if recommended != nil {
-		options = append([]huh.Option[string]{*recommended}, options...)
-	}
-
-	return options
+	return packOptions(registry, catalog.PackCategoryFrontend, catalog.PackIDNextJS, nil)
 }
 
 func backendOptions(registry catalog.Registry) []huh.Option[string] {
+	return packOptions(registry, catalog.PackCategoryBackend, catalog.PackIDHonoNode, func(pack catalog.Pack) string {
+		if pack.ID == catalog.PackIDHonoWorkers {
+			return " (Wrangler envs: dev, staging, production + D1/KV/R2)"
+		}
+		return ""
+	})
+}
+
+func packOptions(registry catalog.Registry, category catalog.PackCategory, recommendedID catalog.PackID, labelSuffix func(catalog.Pack) string) []huh.Option[string] {
 	options := make([]huh.Option[string], 0)
 	var recommended *huh.Option[string]
 
 	for _, pack := range registry.All() {
-		if pack.Category != catalog.PackCategoryBackend {
+		if pack.Category != category {
 			continue
 		}
 
 		label := pack.DisplayName
-		if pack.ID == catalog.PackIDHonoNode {
+		if pack.ID == recommendedID {
 			label += " (recommended)"
 		}
-		if pack.ID == catalog.PackIDHonoWorkers {
-			label += " (Wrangler envs: dev, staging, production + D1/KV/R2)"
+		if labelSuffix != nil {
+			label += labelSuffix(pack)
 		}
 
 		option := huh.NewOption(label, string(pack.ID))
-		if pack.ID == catalog.PackIDHonoNode {
+		if pack.ID == recommendedID {
 			recommended = &option
 			continue
 		}
@@ -740,7 +723,7 @@ func promptRecommendedSkills(cmd *cobra.Command, registry catalog.Registry, inpu
 
 	field := huh.NewConfirm().
 		Title("Copy recommended skills?").
-		Description("Copy pack-specific Codex skill bundles into .agents/skills.").
+		Description("Copy pack-specific skill bundles into .agents/skills for coding agents.").
 		Value(&input.RecommendedSkills)
 
 	return runPromptForm(cmd, field)
@@ -885,6 +868,14 @@ func parseEmailOption(value string) (catalog.EmailOption, error) {
 }
 
 func applyDerivedDefaults(registry catalog.Registry, input *createInput) {
+	if requiresFrontendPack(input.Mode) && input.Frontend == "" {
+		input.Frontend = string(catalog.PackIDNextJS)
+	}
+
+	if requiresBackendPack(input.Mode) && input.Backend == "" {
+		input.Backend = string(catalog.PackIDHonoNode)
+	}
+
 	if input.PackageManager == "" && shouldPromptPackageManager(registry, *input) {
 		recommended := recommendedPackageManager(registry, *input, allowedPackageManagers(registry, *input))
 		if recommended != catalog.PackageManagerNone {
@@ -894,7 +885,25 @@ func applyDerivedDefaults(registry catalog.Registry, input *createInput) {
 
 	applyWorkersLockedDefaults(input)
 
-	if !hasRecommendedSkills(selectedPacks(registry, *input)) {
+	packs := selectedPacks(registry, *input)
+
+	if input.Database == "" && input.Mode != string(catalog.ProjectModeFrontend) {
+		input.Database = string(recommendedDatabaseOption(*input))
+	}
+
+	if input.Auth == "" && input.Mode != string(catalog.ProjectModeFrontend) {
+		input.Auth = string(recommendedAuthOption(packs))
+	}
+
+	if input.Storage == "" && input.Mode != string(catalog.ProjectModeFrontend) {
+		input.Storage = string(recommendedStorageOption(*input))
+	}
+
+	if input.Email == "" && input.Mode != string(catalog.ProjectModeFrontend) {
+		input.Email = string(recommendedEmailOption(packs))
+	}
+
+	if !hasRecommendedSkills(packs) {
 		input.RecommendedSkills = false
 	}
 }
@@ -983,10 +992,6 @@ func recommendedDatabaseOption(input createInput) catalog.DatabaseOption {
 }
 
 func recommendedStorageOption(input createInput) catalog.StorageOption {
-	if usesCloudflareWorkers(input) {
-		return catalog.StorageR2
-	}
-
 	return catalog.StorageR2
 }
 
