@@ -93,6 +93,20 @@ func TestAddonTemplateAssetsExist(t *testing.T) {
 	}
 }
 
+func TestAddonSkillAssetsExist(t *testing.T) {
+	registry := catalog.MustDefaultAddonRegistry()
+
+	for _, addon := range registry.All() {
+		if addon.SkillAssets == nil {
+			continue
+		}
+
+		if !templates.Exists(addon.SkillAssets.Path) {
+			t.Fatalf("addon %q references missing skill asset bundle %q", addon.ID, addon.SkillAssets.Path)
+		}
+	}
+}
+
 func TestAddonRegistryForPackFilters(t *testing.T) {
 	registry := catalog.MustDefaultAddonRegistry()
 

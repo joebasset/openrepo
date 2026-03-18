@@ -52,12 +52,13 @@ func Generate(spec resolver.ProjectSpec, plan resolver.ResolvedPlan, registry ca
 	if err != nil {
 		return Result{}, err
 	}
+	skillAssetPaths := selectedSkillAssetPaths(spec, packs, addonRegistry)
 
 	if err := prepareTargetDir(options.TargetDir, options.DevMode); err != nil {
 		return Result{}, err
 	}
 
-	if err := createProjectDirectories(options.TargetDir, plan, packs); err != nil {
+	if err := createProjectDirectories(options.TargetDir, spec, plan, packs); err != nil {
 		return Result{}, err
 	}
 
@@ -73,7 +74,7 @@ func Generate(spec resolver.ProjectSpec, plan resolver.ResolvedPlan, registry ca
 		return Result{}, err
 	}
 
-	if err := writeRootFiles(options.TargetDir, spec, plan, packs, addonRegistry, options); err != nil {
+	if err := writeRootFiles(options.TargetDir, spec, plan, packs, addonRegistry, options, skillAssetPaths); err != nil {
 		return Result{}, err
 	}
 
@@ -157,17 +158,20 @@ func prepareTargetDir(targetDir string, devMode bool) error {
 	return nil
 }
 
-func createProjectDirectories(targetDir string, plan resolver.ResolvedPlan, packs []catalog.Pack) error {
+func createProjectDirectories(targetDir string, spec resolver.ProjectSpec, plan resolver.ResolvedPlan, packs []catalog.Pack) error {
 	directories := map[string]struct{}{
-		targetDir:                                     {},
-		filepath.Join(targetDir, "apps"):              {},
-		filepath.Join(targetDir, "packages"):          {},
-		filepath.Join(targetDir, ".agents"):           {},
+		targetDir:                           {},
+		filepath.Join(targetDir, ".agents"): {},
 		filepath.Join(targetDir, ".agents", "skills"): {},
 	}
 
+	if !usesSinglePackLayout(spec, packs) {
+		directories[filepath.Join(targetDir, "apps")] = struct{}{}
+		directories[filepath.Join(targetDir, "packages")] = struct{}{}
+	}
+
 	for _, pack := range packs {
-		outputDir := filepath.Join(targetDir, filepath.FromSlash(pack.OutputDir))
+		outputDir := filepath.Join(targetDir, filepath.FromSlash(effectivePackOutputDir(spec, packs, pack)))
 		if pack.Strategy == catalog.PackStrategyExternalScaffold {
 			directories[filepath.Dir(outputDir)] = struct{}{}
 			continue
@@ -196,7 +200,7 @@ func createProjectDirectories(targetDir string, plan resolver.ResolvedPlan, pack
 	return nil
 }
 
-func writeRootFiles(targetDir string, spec resolver.ProjectSpec, plan resolver.ResolvedPlan, packs []catalog.Pack, addonRegistry catalog.AddonRegistry, options Options) error {
+func writeRootFiles(targetDir string, spec resolver.ProjectSpec, plan resolver.ResolvedPlan, packs []catalog.Pack, addonRegistry catalog.AddonRegistry, options Options, skillAssetPaths []string) error {
 	rootFiles := []struct {
 		path           string
 		contents       string
@@ -250,7 +254,7 @@ func writeRootFiles(targetDir string, spec resolver.ProjectSpec, plan resolver.R
 	}
 
 	if plan.WorkspaceStrategy == catalog.WorkspaceStrategyNative {
-		makefile := renderMakefile(packs)
+		makefile := renderMakefile(spec, packs)
 		if strings.TrimSpace(makefile) != "" {
 			if err := writeFile(filepath.Join(targetDir, "Makefile"), makefile); err != nil {
 				return err
@@ -264,12 +268,12 @@ func writeRootFiles(targetDir string, spec resolver.ProjectSpec, plan resolver.R
 		}
 	}
 
-	if err := clearGeneratedSkillAssets(targetDir, packs); err != nil {
+	if err := clearGeneratedSkillAssets(targetDir, skillAssetPaths); err != nil {
 		return err
 	}
 
 	if options.IncludeRecommendedSkills {
-		if err := writeRecommendedSkillAssets(targetDir, packs); err != nil {
+		if err := writeRecommendedSkillAssets(targetDir, skillAssetPaths); err != nil {
 			return err
 		}
 	}
@@ -294,6 +298,7 @@ func scaffoldPacks(targetDir string, spec resolver.ProjectSpec, packs []catalog.
 			}
 
 			outputPath := filepath.Join(targetDir, filepath.FromSlash(file.Path))
+			outputPath = filepath.Join(targetDir, filepath.FromSlash(effectiveManagedFilePath(spec, packs, pack, file.Path)))
 			contents, err := renderTemplateAsset(file.AssetPath, data)
 			if err != nil {
 				return err
@@ -311,7 +316,7 @@ func packTemplateData(spec resolver.ProjectSpec, pack catalog.Pack) templateData
 	return templateData{
 		ProjectName: spec.ProjectName,
 		ProjectSlug: projectSlug(spec.ProjectName),
-		ModulePath:  goModulePath(spec.ProjectName, pack.OutputDir),
+		ModulePath:  goModulePath(spec.ProjectName, effectivePackOutputDir(spec, nil, pack)),
 		Runtime:     string(pack.Runtime),
 		Database:    string(spec.Database),
 		Auth:        string(spec.Auth),
@@ -321,7 +326,7 @@ func packTemplateData(spec resolver.ProjectSpec, pack catalog.Pack) templateData
 }
 
 func scaffoldAddons(targetDir string, spec resolver.ProjectSpec, packs []catalog.Pack, addonRegistry catalog.AddonRegistry) error {
-	for _, pack := range packs {
+	for _, pack := range integrationPacks(spec, packs) {
 		addons := addonRegistry.Resolve(pack.ID, spec.Auth, spec.Database, spec.Storage, spec.Email)
 		data := packTemplateData(spec, pack)
 
@@ -331,7 +336,7 @@ func scaffoldAddons(targetDir string, spec resolver.ProjectSpec, packs []catalog
 					continue
 				}
 
-				outputPath := filepath.Join(targetDir, filepath.FromSlash(file.Path))
+				outputPath := filepath.Join(targetDir, filepath.FromSlash(effectiveManagedFilePath(spec, packs, pack, file.Path)))
 				contents, err := renderTemplateAsset(file.AssetPath, data)
 				if err != nil {
 					return fmt.Errorf("render addon template %q for %s: %w", file.AssetPath, addon.DisplayName, err)
@@ -347,7 +352,7 @@ func scaffoldAddons(targetDir string, spec resolver.ProjectSpec, packs []catalog
 }
 
 func mergeAddonDependencies(targetDir string, spec resolver.ProjectSpec, packs []catalog.Pack, addonRegistry catalog.AddonRegistry) error {
-	for _, pack := range packs {
+	for _, pack := range integrationPacks(spec, packs) {
 		addons := addonRegistry.Resolve(pack.ID, spec.Auth, spec.Database, spec.Storage, spec.Email)
 		if len(addons) == 0 {
 			continue
@@ -364,7 +369,7 @@ func mergeAddonDependencies(targetDir string, spec resolver.ProjectSpec, packs [
 			continue
 		}
 
-		manifestPath := filepath.Join(targetDir, filepath.FromSlash(pack.OutputDir), "package.json")
+		manifestPath := filepath.Join(targetDir, filepath.FromSlash(effectivePackOutputDir(spec, packs, pack)), "package.json")
 		if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
 			continue
 		}
@@ -429,14 +434,14 @@ func mergePackageJSONAddons(path string, addons []catalog.Addon) error {
 
 func writePackOverlays(targetDir string, spec resolver.ProjectSpec, packs []catalog.Pack, addonRegistry catalog.AddonRegistry) error {
 	for _, pack := range packs {
-		addons := addonRegistry.Resolve(pack.ID, spec.Auth, spec.Database, spec.Storage, spec.Email)
+		addons := addonsForPack(spec, packs, pack, addonRegistry)
 
 		for _, file := range pack.Files {
 			if file.Role != catalog.FileRoleOverlay {
 				continue
 			}
 
-			outputPath := filepath.Join(targetDir, filepath.FromSlash(file.Path))
+			outputPath := filepath.Join(targetDir, filepath.FromSlash(effectiveManagedFilePath(spec, packs, pack, file.Path)))
 			switch filepath.Base(file.Path) {
 			case ".env.example":
 				if err := writeFile(outputPath, renderPackEnvExample(pack, spec, addons)); err != nil {
@@ -529,7 +534,7 @@ func externalScaffoldCommand(targetDir string, spec resolver.ProjectSpec, pack c
 	}
 
 	args := make([]string, 0, len(command.Args)+8)
-	projectDir := filepath.Join(targetDir, filepath.FromSlash(pack.OutputDir))
+	projectDir := filepath.Join(targetDir, filepath.FromSlash(effectivePackOutputDir(spec, nil, pack)))
 	for _, arg := range command.Args {
 		args = append(args, strings.ReplaceAll(arg, "{{project_dir}}", projectDir))
 	}
@@ -592,7 +597,11 @@ func packSpecificExternalArgs(packID catalog.PackID, manager catalog.PackageMana
 }
 
 func installDependencies(targetDir string, spec resolver.ProjectSpec, plan resolver.ResolvedPlan) ([]string, error) {
-	if plan.WorkspaceStrategy != catalog.WorkspaceStrategyTurbo || spec.PackageManager == catalog.PackageManagerNone {
+	if spec.PackageManager == catalog.PackageManagerNone {
+		return []string{"Dependency installation is not automated yet for native workspaces."}, nil
+	}
+
+	if plan.WorkspaceStrategy != catalog.WorkspaceStrategyTurbo && !usesSinglePackLayout(spec, nil) {
 		return []string{"Dependency installation is not automated yet for native workspaces."}, nil
 	}
 
@@ -657,7 +666,7 @@ func renderRootReadme(spec resolver.ProjectSpec, plan resolver.ResolvedPlan, pac
 
 	for _, pack := range packs {
 		builder.WriteString("- `")
-		builder.WriteString(pack.OutputDir)
+		builder.WriteString(effectivePackOutputDir(spec, packs, pack))
 		builder.WriteString("`: ")
 		builder.WriteString(pack.DisplayName)
 		builder.WriteString("\n")
@@ -794,7 +803,7 @@ func renderRootAgentsFile(spec resolver.ProjectSpec, plan resolver.ResolvedPlan,
 	builder.WriteString("\n## Apps\n\n")
 	for _, pack := range packs {
 		builder.WriteString("- ")
-		builder.WriteString(pack.OutputDir)
+		builder.WriteString(effectivePackOutputDir(spec, packs, pack))
 		builder.WriteString(": ")
 		builder.WriteString(pack.DisplayName)
 		builder.WriteString("\n")
@@ -828,18 +837,14 @@ func renderRootAgentsFile(spec resolver.ProjectSpec, plan resolver.ResolvedPlan,
 	return builder.String()
 }
 
-func clearGeneratedSkillAssets(targetDir string, packs []catalog.Pack) error {
-	for _, pack := range packs {
-		if pack.SkillAssets == nil {
-			continue
-		}
-
-		entries, err := fs.ReadDir(templates.Assets, pack.SkillAssets.Path)
+func clearGeneratedSkillAssets(targetDir string, skillAssetPaths []string) error {
+	for _, skillAssetPath := range skillAssetPaths {
+		entries, err := fs.ReadDir(templates.Assets, skillAssetPath)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
-			return fmt.Errorf("read skill asset bundle %q: %w", pack.SkillAssets.Path, err)
+			return fmt.Errorf("read skill asset bundle %q: %w", skillAssetPath, err)
 		}
 
 		for _, entry := range entries {
@@ -853,18 +858,44 @@ func clearGeneratedSkillAssets(targetDir string, packs []catalog.Pack) error {
 	return nil
 }
 
-func writeRecommendedSkillAssets(targetDir string, packs []catalog.Pack) error {
-	for _, pack := range packs {
-		if pack.SkillAssets == nil {
-			continue
-		}
-
-		if err := copySkillAssetBundle(pack.SkillAssets.Path, filepath.Join(targetDir, ".agents", "skills")); err != nil {
+func writeRecommendedSkillAssets(targetDir string, skillAssetPaths []string) error {
+	for _, skillAssetPath := range skillAssetPaths {
+		if err := copySkillAssetBundle(skillAssetPath, filepath.Join(targetDir, ".agents", "skills")); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func selectedSkillAssetPaths(spec resolver.ProjectSpec, packs []catalog.Pack, addonRegistry catalog.AddonRegistry) []string {
+	paths := make([]string, 0)
+	seen := make(map[string]struct{})
+
+	appendPath := func(bundle *catalog.SkillAssetBundle) {
+		if bundle == nil || bundle.Path == "" {
+			return
+		}
+		if _, ok := seen[bundle.Path]; ok {
+			return
+		}
+		seen[bundle.Path] = struct{}{}
+		paths = append(paths, bundle.Path)
+	}
+
+	for _, pack := range packs {
+		appendPath(pack.SkillAssets)
+	}
+
+	for _, pack := range integrationPacks(spec, packs) {
+		for _, addon := range addonRegistry.Resolve(pack.ID, spec.Auth, spec.Database, spec.Storage, spec.Email) {
+			appendPath(addon.SkillAssets)
+		}
+	}
+
+	sort.Strings(paths)
+
+	return paths
 }
 
 func copySkillAssetBundle(assetPath string, targetDir string) error {
@@ -1123,7 +1154,7 @@ func renderSharedTypesReadme(spec resolver.ProjectSpec) string {
 	return fmt.Sprintf("# Shared Types\n\nCommon TypeScript contracts for the `%s` workspace.\n", spec.ProjectName)
 }
 
-func renderMakefile(packs []catalog.Pack) string {
+func renderMakefile(spec resolver.ProjectSpec, packs []catalog.Pack) string {
 	targetOrder := []string{"dev", "build", "start", "lint", "test", "fmt"}
 	commandsByTarget := make(map[string][]string)
 
@@ -1136,7 +1167,7 @@ func renderMakefile(packs []catalog.Pack) string {
 
 				commandsByTarget[target] = append(
 					commandsByTarget[target],
-					fmt.Sprintf("cd %s && %s", pack.OutputDir, script.Command),
+					fmt.Sprintf("cd %s && %s", effectivePackOutputDir(spec, packs, pack), script.Command),
 				)
 			}
 		}
@@ -1207,7 +1238,7 @@ func integrationEnvVars(spec resolver.ProjectSpec, packs []catalog.Pack, addonRe
 	}
 
 	// All other integration env vars come from addons.
-	for _, pack := range packs {
+	for _, pack := range integrationPacks(spec, packs) {
 		addons := addonRegistry.Resolve(pack.ID, spec.Auth, spec.Database, spec.Storage, spec.Email)
 		for _, addon := range addons {
 			if addon.Integration == catalog.IntegrationDatabase {
@@ -1285,7 +1316,64 @@ func projectSlug(projectName string) string {
 }
 
 func goModulePath(projectName string, outputDir string) string {
+	if outputDir == "." || outputDir == "" {
+		return projectSlug(projectName)
+	}
+
 	return projectSlug(projectName) + "/" + strings.TrimPrefix(outputDir, "./")
+}
+
+func usesSinglePackLayout(spec resolver.ProjectSpec, packs []catalog.Pack) bool {
+	if spec.Mode != catalog.ProjectModeFullStack || spec.FrontendPackID == "" || spec.FrontendPackID != spec.BackendPackID {
+		return false
+	}
+
+	if len(packs) == 0 {
+		return true
+	}
+
+	return len(packs) == 1
+}
+
+func effectivePackOutputDir(spec resolver.ProjectSpec, packs []catalog.Pack, pack catalog.Pack) string {
+	if usesSinglePackLayout(spec, packs) {
+		return "."
+	}
+
+	return pack.OutputDir
+}
+
+func effectiveManagedFilePath(spec resolver.ProjectSpec, packs []catalog.Pack, pack catalog.Pack, path string) string {
+	if !usesSinglePackLayout(spec, packs) {
+		return path
+	}
+
+	prefix := strings.TrimSuffix(pack.OutputDir, "/") + "/"
+	return strings.TrimPrefix(path, prefix)
+}
+
+func integrationPacks(spec resolver.ProjectSpec, packs []catalog.Pack) []catalog.Pack {
+	if spec.Mode != catalog.ProjectModeFullStack || spec.BackendPackID == "" {
+		return packs
+	}
+
+	for _, pack := range packs {
+		if pack.ID == spec.BackendPackID {
+			return []catalog.Pack{pack}
+		}
+	}
+
+	return packs
+}
+
+func addonsForPack(spec resolver.ProjectSpec, packs []catalog.Pack, pack catalog.Pack, addonRegistry catalog.AddonRegistry) []catalog.Addon {
+	for _, integrationPack := range integrationPacks(spec, packs) {
+		if integrationPack.ID == pack.ID {
+			return addonRegistry.Resolve(pack.ID, spec.Auth, spec.Database, spec.Storage, spec.Email)
+		}
+	}
+
+	return nil
 }
 
 func writeFile(path string, contents string) error {

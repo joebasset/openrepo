@@ -21,6 +21,7 @@ type commandFlagState struct {
 type reviewAction string
 
 const (
+	noneSelectionValue                         = "none"
 	reviewActionCreate            reviewAction = "create"
 	reviewActionMode              reviewAction = "mode"
 	reviewActionFrontend          reviewAction = "frontend"
@@ -140,9 +141,6 @@ func packOptions(registry catalog.Registry, category catalog.PackCategory, recom
 		}
 
 		label := pack.DisplayName
-		if pack.ID == recommendedID {
-			label += " (recommended)"
-		}
 		if labelSuffix != nil {
 			label += labelSuffix(pack)
 		}
@@ -185,7 +183,7 @@ func packageManagerOptions(registry catalog.Registry, input createInput) []huh.O
 
 func authPromptOptions(registry catalog.Registry, input createInput) []huh.Option[string] {
 	if input.Mode == string(catalog.ProjectModeFrontend) {
-		return []huh.Option[string]{huh.NewOption("None", "")}
+		return []huh.Option[string]{huh.NewOption("None", noneSelectionValue)}
 	}
 
 	packs := selectedPacks(registry, input)
@@ -207,9 +205,9 @@ func authPromptOptions(registry catalog.Registry, input createInput) []huh.Optio
 	}
 
 	if recommended == catalog.AuthNone || len(options) == 0 {
-		options = append([]huh.Option[string]{huh.NewOption("None", "")}, options...)
+		options = append([]huh.Option[string]{huh.NewOption("None", noneSelectionValue)}, options...)
 	} else {
-		options = append(options, huh.NewOption("None", ""))
+		options = append(options, huh.NewOption("None", noneSelectionValue))
 	}
 
 	return options
@@ -217,7 +215,7 @@ func authPromptOptions(registry catalog.Registry, input createInput) []huh.Optio
 
 func databasePromptOptions(registry catalog.Registry, input createInput) []huh.Option[string] {
 	if input.Mode == string(catalog.ProjectModeFrontend) {
-		return []huh.Option[string]{huh.NewOption("None", "")}
+		return []huh.Option[string]{huh.NewOption("None", noneSelectionValue)}
 	}
 
 	packs := selectedPacks(registry, input)
@@ -227,7 +225,7 @@ func databasePromptOptions(registry catalog.Registry, input createInput) []huh.O
 		}
 	}
 	if !hasCapability(packs, func(pack catalog.Pack) bool { return pack.Capabilities.SupportsDatabase }) {
-		return []huh.Option[string]{huh.NewOption("None", "")}
+		return []huh.Option[string]{huh.NewOption("None", noneSelectionValue)}
 	}
 
 	options := []huh.Option[string]{
@@ -236,12 +234,12 @@ func databasePromptOptions(registry catalog.Registry, input createInput) []huh.O
 		huh.NewOption("Supabase", string(catalog.DatabaseSupabase)),
 	}
 
-	return append(options, huh.NewOption("None", ""))
+	return append(options, huh.NewOption("None", noneSelectionValue))
 }
 
 func storagePromptOptions(registry catalog.Registry, input createInput) []huh.Option[string] {
 	if input.Mode == string(catalog.ProjectModeFrontend) {
-		return []huh.Option[string]{huh.NewOption("None", "")}
+		return []huh.Option[string]{huh.NewOption("None", noneSelectionValue)}
 	}
 
 	packs := selectedPacks(registry, input)
@@ -251,7 +249,7 @@ func storagePromptOptions(registry catalog.Registry, input createInput) []huh.Op
 		}
 	}
 	if !hasCapability(packs, func(pack catalog.Pack) bool { return pack.Capabilities.SupportsStorage }) {
-		return []huh.Option[string]{huh.NewOption("None", "")}
+		return []huh.Option[string]{huh.NewOption("None", noneSelectionValue)}
 	}
 
 	options := []huh.Option[string]{
@@ -260,22 +258,22 @@ func storagePromptOptions(registry catalog.Registry, input createInput) []huh.Op
 		huh.NewOption("Supabase Storage", string(catalog.StorageSupabase)),
 	}
 
-	return append(options, huh.NewOption("None", ""))
+	return append(options, huh.NewOption("None", noneSelectionValue))
 }
 
 func emailPromptOptions(registry catalog.Registry, input createInput) []huh.Option[string] {
 	if input.Mode == string(catalog.ProjectModeFrontend) {
-		return []huh.Option[string]{huh.NewOption("None", "")}
+		return []huh.Option[string]{huh.NewOption("None", noneSelectionValue)}
 	}
 
 	packs := selectedPacks(registry, input)
 	if !hasCapability(packs, func(pack catalog.Pack) bool { return pack.Capabilities.SupportsEmail }) {
-		return []huh.Option[string]{huh.NewOption("None", "")}
+		return []huh.Option[string]{huh.NewOption("None", noneSelectionValue)}
 	}
 
 	return []huh.Option[string]{
 		huh.NewOption("Resend (recommended)", string(catalog.EmailResend)),
-		huh.NewOption("None", ""),
+		huh.NewOption("None", noneSelectionValue),
 	}
 }
 
@@ -384,14 +382,70 @@ func hasCapability(packs []catalog.Pack, supports func(pack catalog.Pack) bool) 
 	return false
 }
 
-func hasRecommendedSkills(packs []catalog.Pack) bool {
-	for _, pack := range packs {
+func hasRecommendedSkills(registry catalog.Registry, input createInput) bool {
+	for _, pack := range selectedPacks(registry, input) {
 		if pack.SkillAssets != nil {
 			return true
 		}
 	}
 
+	for _, addon := range selectedAddons(input) {
+		if addon.SkillAssets != nil {
+			return true
+		}
+	}
+
 	return false
+}
+
+func selectedAddons(input createInput) []catalog.Addon {
+	if input.Backend == "" {
+		return nil
+	}
+
+	return catalog.MustDefaultAddonRegistry().Resolve(
+		catalog.PackID(input.Backend),
+		authOptionFromInput(input.Auth),
+		databaseOptionFromInput(input.Database),
+		storageOptionFromInput(input.Storage),
+		emailOptionFromInput(input.Email),
+	)
+}
+
+func authOptionFromInput(value string) catalog.AuthOption {
+	option, err := parseAuthOption(value)
+	if err != nil {
+		return catalog.AuthNone
+	}
+
+	return option
+}
+
+func databaseOptionFromInput(value string) catalog.DatabaseOption {
+	option, err := parseDatabaseOption(value)
+	if err != nil {
+		return catalog.DatabaseNone
+	}
+
+	return option
+}
+
+func storageOptionFromInput(value string) catalog.StorageOption {
+	option, err := parseStorageOption(value)
+	if err != nil {
+		return catalog.StorageNone
+	}
+
+	return option
+}
+
+func emailOptionFromInput(value string) catalog.EmailOption {
+	option, err := parseEmailOption(value)
+	if err != nil {
+		return catalog.EmailNone
+	}
+
+	return option
 }
 
 func requiresFrontendPack(mode string) bool {
@@ -582,7 +636,7 @@ func promptSelectionSteps(cmd *cobra.Command, registry catalog.Registry, input *
 		}
 	}
 
-	if !flagState.recommendedSkillsSet && hasRecommendedSkills(selectedPacks(registry, *input)) {
+	if !flagState.recommendedSkillsSet && hasRecommendedSkills(registry, *input) {
 		input.RecommendedSkills = true
 		if err := promptRecommendedSkills(cmd, registry, input); err != nil {
 			return err
@@ -636,7 +690,7 @@ func reviewOptions(registry catalog.Registry, input createInput) []huh.Option[st
 	if len(emailPromptOptions(registry, input)) > 1 {
 		options = append(options, huh.NewOption("Change email ("+displayValue(input.Email, "none")+")", string(reviewActionEmail)))
 	}
-	if hasRecommendedSkills(selectedPacks(registry, input)) || input.RecommendedSkills {
+	if hasRecommendedSkills(registry, input) || input.RecommendedSkills {
 		options = append(options, huh.NewOption("Change recommended skills ("+boolLabel(input.RecommendedSkills)+")", string(reviewActionRecommendedSkills)))
 	}
 
@@ -717,14 +771,14 @@ func promptInstall(cmd *cobra.Command, input *createInput) error {
 }
 
 func promptRecommendedSkills(cmd *cobra.Command, registry catalog.Registry, input *createInput) error {
-	if !hasRecommendedSkills(selectedPacks(registry, *input)) {
+	if !hasRecommendedSkills(registry, *input) {
 		input.RecommendedSkills = false
 		return nil
 	}
 
 	field := huh.NewConfirm().
 		Title("Copy recommended skills?").
-		Description("Copy pack-specific skill bundles into .agents/skills for coding agents.").
+		Description("Copy pack- and integration-specific skill bundles into .agents/skills for coding agents.").
 		Value(&input.RecommendedSkills)
 
 	return runPromptForm(cmd, field)
@@ -816,7 +870,7 @@ func parsePackageManager(value string) (catalog.PackageManager, error) {
 
 func parseDatabaseOption(value string) (catalog.DatabaseOption, error) {
 	switch value {
-	case "":
+	case "", "none":
 		return catalog.DatabaseNone, nil
 	case string(catalog.DatabaseD1):
 		return catalog.DatabaseD1, nil
@@ -833,7 +887,7 @@ func parseDatabaseOption(value string) (catalog.DatabaseOption, error) {
 
 func parseAuthOption(value string) (catalog.AuthOption, error) {
 	switch value {
-	case "":
+	case "", "none":
 		return catalog.AuthNone, nil
 	case string(catalog.AuthBetter):
 		return catalog.AuthBetter, nil
@@ -846,7 +900,7 @@ func parseAuthOption(value string) (catalog.AuthOption, error) {
 
 func parseStorageOption(value string) (catalog.StorageOption, error) {
 	switch value {
-	case "":
+	case "", "none":
 		return catalog.StorageNone, nil
 	case string(catalog.StorageR2):
 		return catalog.StorageR2, nil
@@ -861,7 +915,7 @@ func parseStorageOption(value string) (catalog.StorageOption, error) {
 
 func parseEmailOption(value string) (catalog.EmailOption, error) {
 	switch value {
-	case "":
+	case "", "none":
 		return catalog.EmailNone, nil
 	case string(catalog.EmailResend):
 		return catalog.EmailResend, nil
@@ -906,7 +960,7 @@ func applyDerivedDefaults(registry catalog.Registry, input *createInput) {
 		input.Email = string(recommendedEmailOption(packs))
 	}
 
-	if !hasRecommendedSkills(packs) {
+	if !hasRecommendedSkills(registry, *input) {
 		input.RecommendedSkills = false
 	}
 }
@@ -936,23 +990,23 @@ func applySelectionConstraints(registry catalog.Registry, input *createInput) {
 		}
 	}
 
-	if !optionValuesContain(authPromptOptions(registry, *input), input.Auth) {
+	if shouldClearSelection(authPromptOptions(registry, *input), input.Auth) {
 		input.Auth = ""
 	}
 
-	if !optionValuesContain(databasePromptOptions(registry, *input), input.Database) {
+	if shouldClearSelection(databasePromptOptions(registry, *input), input.Database) {
 		input.Database = ""
 	}
 
-	if !optionValuesContain(storagePromptOptions(registry, *input), input.Storage) {
+	if shouldClearSelection(storagePromptOptions(registry, *input), input.Storage) {
 		input.Storage = ""
 	}
 
-	if !optionValuesContain(emailPromptOptions(registry, *input), input.Email) {
+	if shouldClearSelection(emailPromptOptions(registry, *input), input.Email) {
 		input.Email = ""
 	}
 
-	if !hasRecommendedSkills(selectedPacks(registry, *input)) {
+	if !hasRecommendedSkills(registry, *input) {
 		input.RecommendedSkills = false
 	}
 }
@@ -1014,4 +1068,12 @@ func optionValuesContain(options []huh.Option[string], value string) bool {
 	}
 
 	return false
+}
+
+func shouldClearSelection(options []huh.Option[string], value string) bool {
+	if optionValuesContain(options, value) {
+		return false
+	}
+
+	return !(value == "none" && optionValuesContain(options, ""))
 }

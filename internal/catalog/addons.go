@@ -17,9 +17,22 @@ func supabaseStorageEnvVars() []EnvVar {
 	}
 }
 
+func betterAuthSkillAssets() *SkillAssetBundle {
+	return &SkillAssetBundle{Path: "assets/skills/addons/better-auth"}
+}
+
+func supabaseSkillAssets() *SkillAssetBundle {
+	return &SkillAssetBundle{Path: "assets/skills/addons/supabase"}
+}
+
+func resendSkillAssets() *SkillAssetBundle {
+	return &SkillAssetBundle{Path: "assets/skills/addons/resend"}
+}
+
 func defaultAddons() []Addon {
 	return []Addon{
 		// Hono Node addons
+		honoNodeSupabaseDatabaseAddon(),
 		honoNodeBetterAuthAddon(),
 		honoNodeSupabaseAuthAddon(),
 		honoNodeS3Addon(),
@@ -31,6 +44,7 @@ func defaultAddons() []Addon {
 		honoWorkersResendAddon(),
 
 		// Next.js addons
+		nextjsSupabaseDatabaseAddon(),
 		nextjsBetterAuthAddon(),
 		nextjsSupabaseAuthAddon(),
 		nextjsS3Addon(),
@@ -39,6 +53,7 @@ func defaultAddons() []Addon {
 		nextjsResendAddon(),
 
 		// FastAPI addons
+		fastAPISupabaseDatabaseAddon(),
 		fastAPISupabaseAuthAddon(),
 		fastAPIS3Addon(),
 		fastAPIR2Addon(),
@@ -46,6 +61,7 @@ func defaultAddons() []Addon {
 		fastAPIResendAddon(),
 
 		// Gin addons
+		ginSupabaseDatabaseAddon(),
 		ginSupabaseAuthAddon(),
 		ginS3Addon(),
 		ginR2Addon(),
@@ -57,6 +73,18 @@ func defaultAddons() []Addon {
 // ---------------------------------------------------------------------------
 // Hono Node addons
 // ---------------------------------------------------------------------------
+
+func honoNodeSupabaseDatabaseAddon() Addon {
+	packID := PackIDHonoNode
+	return Addon{
+		ID:               NewAddonID(IntegrationDatabase, string(DatabaseSupabase), packID),
+		Integration:      IntegrationDatabase,
+		IntegrationValue: string(DatabaseSupabase),
+		PackID:           packID,
+		DisplayName:      "Supabase Database for Hono Node",
+		SkillAssets:      supabaseSkillAssets(),
+	}
+}
 
 func honoNodeBetterAuthAddon() Addon {
 	packID := PackIDHonoNode
@@ -85,6 +113,7 @@ func honoNodeBetterAuthAddon() Addon {
 		AgentRules: []AgentRule{
 			{Title: "Auth Sessions", Instruction: "Use the auth middleware on protected routes and access the session from the Hono context."},
 		},
+		SkillAssets: betterAuthSkillAssets(),
 	}
 }
 
@@ -113,6 +142,7 @@ func honoNodeSupabaseAuthAddon() Addon {
 		AgentRules: []AgentRule{
 			{Title: "Supabase Auth", Instruction: "Use Supabase Auth middleware on protected routes and validate JWTs server-side."},
 		},
+		SkillAssets: supabaseSkillAssets(),
 	}
 }
 
@@ -187,6 +217,7 @@ func honoNodeSupabaseStorageAddon() Addon {
 		AgentRules: []AgentRule{
 			{Title: "Supabase Storage", Instruction: "Use the storage client from src/lib/storage.ts for file operations."},
 		},
+		SkillAssets: supabaseSkillAssets(),
 	}
 }
 
@@ -212,6 +243,7 @@ func honoNodeResendAddon() Addon {
 		AgentRules: []AgentRule{
 			{Title: "Email", Instruction: "Use the email client from src/lib/email.ts for sending emails instead of direct Resend SDK calls."},
 		},
+		SkillAssets: resendSkillAssets(),
 	}
 }
 
@@ -241,12 +273,25 @@ func honoWorkersResendAddon() Addon {
 		AgentRules: []AgentRule{
 			{Title: "Email", Instruction: "Use the email client from src/lib/email.ts for sending emails."},
 		},
+		SkillAssets: resendSkillAssets(),
 	}
 }
 
 // ---------------------------------------------------------------------------
 // Next.js addons
 // ---------------------------------------------------------------------------
+
+func nextjsSupabaseDatabaseAddon() Addon {
+	packID := PackIDNextJS
+	return Addon{
+		ID:               NewAddonID(IntegrationDatabase, string(DatabaseSupabase), packID),
+		Integration:      IntegrationDatabase,
+		IntegrationValue: string(DatabaseSupabase),
+		PackID:           packID,
+		DisplayName:      "Supabase Database for Next.js",
+		SkillAssets:      supabaseSkillAssets(),
+	}
+}
 
 func nextjsBetterAuthAddon() Addon {
 	packID := PackIDNextJS
@@ -267,6 +312,7 @@ func nextjsBetterAuthAddon() Addon {
 		AgentRules: []AgentRule{
 			{Title: "Auth Client", Instruction: "Use the auth client from src/lib/auth-client.ts for sign-in, sign-up, and session access in React components."},
 		},
+		SkillAssets: betterAuthSkillAssets(),
 	}
 }
 
@@ -285,7 +331,7 @@ func nextjsSupabaseAuthAddon() Addon {
 		},
 		Dependencies: map[string]string{
 			"@supabase/supabase-js": "^2.49.0",
-			"@supabase/ssr":        "^0.6.0",
+			"@supabase/ssr":         "^0.6.0",
 		},
 		EnvVars: []EnvVar{
 			{Name: "NEXT_PUBLIC_SUPABASE_URL", Example: "https://your-project.supabase.co", Required: true, Description: "Supabase project URL exposed to the browser."},
@@ -294,6 +340,7 @@ func nextjsSupabaseAuthAddon() Addon {
 		AgentRules: []AgentRule{
 			{Title: "Supabase Client", Instruction: "Use the Supabase client from src/lib/supabase.ts for auth flows in components."},
 		},
+		SkillAssets: supabaseSkillAssets(),
 	}
 }
 
@@ -368,6 +415,7 @@ func nextjsSupabaseStorageAddon() Addon {
 		AgentRules: []AgentRule{
 			{Title: "Supabase Storage", Instruction: "Use the storage client from src/lib/storage.ts for file operations in API routes."},
 		},
+		SkillAssets: supabaseSkillAssets(),
 	}
 }
 
@@ -393,12 +441,25 @@ func nextjsResendAddon() Addon {
 		AgentRules: []AgentRule{
 			{Title: "Email", Instruction: "Use the email client from src/lib/email.ts for sending emails in API routes."},
 		},
+		SkillAssets: resendSkillAssets(),
 	}
 }
 
 // ---------------------------------------------------------------------------
 // FastAPI addons
 // ---------------------------------------------------------------------------
+
+func fastAPISupabaseDatabaseAddon() Addon {
+	packID := PackIDFastAPI
+	return Addon{
+		ID:               NewAddonID(IntegrationDatabase, string(DatabaseSupabase), packID),
+		Integration:      IntegrationDatabase,
+		IntegrationValue: string(DatabaseSupabase),
+		PackID:           packID,
+		DisplayName:      "Supabase Database for FastAPI",
+		SkillAssets:      supabaseSkillAssets(),
+	}
+}
 
 func fastAPISupabaseAuthAddon() Addon {
 	packID := PackIDFastAPI
@@ -421,6 +482,7 @@ func fastAPISupabaseAuthAddon() Addon {
 		AgentRules: []AgentRule{
 			{Title: "Supabase Auth", Instruction: "Use the get_current_user dependency from app/lib/supabase.py on protected endpoints."},
 		},
+		SkillAssets: supabaseSkillAssets(),
 	}
 }
 
@@ -486,6 +548,7 @@ func fastAPISupabaseStorageAddon() Addon {
 		AgentRules: []AgentRule{
 			{Title: "Supabase Storage", Instruction: "Use the storage client from app/lib/storage.py for file operations."},
 		},
+		SkillAssets: supabaseSkillAssets(),
 	}
 }
 
@@ -508,12 +571,25 @@ func fastAPIResendAddon() Addon {
 		AgentRules: []AgentRule{
 			{Title: "Email", Instruction: "Use the email client from app/lib/email.py for sending emails."},
 		},
+		SkillAssets: resendSkillAssets(),
 	}
 }
 
 // ---------------------------------------------------------------------------
 // Gin addons
 // ---------------------------------------------------------------------------
+
+func ginSupabaseDatabaseAddon() Addon {
+	packID := PackIDGin
+	return Addon{
+		ID:               NewAddonID(IntegrationDatabase, string(DatabaseSupabase), packID),
+		Integration:      IntegrationDatabase,
+		IntegrationValue: string(DatabaseSupabase),
+		PackID:           packID,
+		DisplayName:      "Supabase Database for Gin",
+		SkillAssets:      supabaseSkillAssets(),
+	}
+}
 
 func ginSupabaseAuthAddon() Addon {
 	packID := PackIDGin
@@ -535,6 +611,7 @@ func ginSupabaseAuthAddon() Addon {
 		AgentRules: []AgentRule{
 			{Title: "Supabase Auth", Instruction: "Use the RequireAuth middleware from internal/auth/supabase.go on protected route groups."},
 		},
+		SkillAssets: supabaseSkillAssets(),
 	}
 }
 
@@ -600,6 +677,7 @@ func ginSupabaseStorageAddon() Addon {
 		AgentRules: []AgentRule{
 			{Title: "Supabase Storage", Instruction: "Use the storage client from internal/storage/supabase.go for file operations."},
 		},
+		SkillAssets: supabaseSkillAssets(),
 	}
 }
 
@@ -622,5 +700,6 @@ func ginResendAddon() Addon {
 		AgentRules: []AgentRule{
 			{Title: "Email", Instruction: "Use the email client from internal/email/resend.go for sending emails."},
 		},
+		SkillAssets: resendSkillAssets(),
 	}
 }

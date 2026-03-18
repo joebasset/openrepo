@@ -17,6 +17,25 @@ func TestFrontendOptionsPutRecommendedPackFirst(t *testing.T) {
 	if options[0].Value != string(catalog.PackIDNextJS) {
 		t.Fatalf("expected nextjs first, got %q", options[0].Value)
 	}
+
+	if options[0].Key != "Next.js" {
+		t.Fatalf("expected frontend label without recommended marker, got %q", options[0].Key)
+	}
+}
+
+func TestBackendOptionsDoNotShowRecommendedMarker(t *testing.T) {
+	options := backendOptions(catalog.MustDefaultRegistry())
+	if len(options) == 0 {
+		t.Fatal("expected backend options")
+	}
+
+	if options[0].Value != string(catalog.PackIDHonoNode) {
+		t.Fatalf("expected hono-node first, got %q", options[0].Value)
+	}
+
+	if options[0].Key != "Hono (Node.js)" {
+		t.Fatalf("expected backend label without recommended marker, got %q", options[0].Key)
+	}
 }
 
 func TestPackageManagerOptionsPutRecommendedManagerFirst(t *testing.T) {
@@ -86,6 +105,32 @@ func TestFrontendModeHidesManagedIntegrationPrompts(t *testing.T) {
 	}
 }
 
+func TestManagedPromptOptionsUseExplicitNoneValue(t *testing.T) {
+	registry := catalog.MustDefaultRegistry()
+	input := createInput{
+		Mode:     string(catalog.ProjectModeFullStack),
+		Frontend: string(catalog.PackIDNextJS),
+		Backend:  string(catalog.PackIDHonoNode),
+	}
+
+	assertHasNoneOption := func(t *testing.T, options []huh.Option[string]) {
+		t.Helper()
+
+		for _, option := range options {
+			if option.Value == noneSelectionValue {
+				return
+			}
+		}
+
+		t.Fatalf("expected explicit none option, got %#v", options)
+	}
+
+	assertHasNoneOption(t, authPromptOptions(registry, input))
+	assertHasNoneOption(t, databasePromptOptions(registry, input))
+	assertHasNoneOption(t, storagePromptOptions(registry, input))
+	assertHasNoneOption(t, emailPromptOptions(registry, input))
+}
+
 func TestApplySelectionConstraintsClearsFrontendOnlyManagedIntegrations(t *testing.T) {
 	registry := catalog.MustDefaultRegistry()
 	input := createInput{
@@ -110,7 +155,7 @@ func TestApplySelectionConstraintsClearsFrontendOnlyManagedIntegrations(t *testi
 	}
 }
 
-func TestApplySelectionConstraintsClearsRecommendedSkillsWhenNoPackRequiresThem(t *testing.T) {
+func TestApplySelectionConstraintsClearsRecommendedSkillsWhenNoPackOrAddonRequiresThem(t *testing.T) {
 	registry := catalog.MustDefaultRegistry()
 	input := createInput{
 		Mode:              string(catalog.ProjectModeBackend),
@@ -121,7 +166,86 @@ func TestApplySelectionConstraintsClearsRecommendedSkillsWhenNoPackRequiresThem(
 	applySelectionConstraints(registry, &input)
 
 	if input.RecommendedSkills {
-		t.Fatal("expected recommended skills to be cleared when no selected pack declares them")
+		t.Fatal("expected recommended skills to be cleared when no selected pack or addon declares them")
+	}
+}
+
+func TestApplySelectionConstraintsPreservesRecommendedSkillsWhenAddonProvidesThem(t *testing.T) {
+	registry := catalog.MustDefaultRegistry()
+	input := createInput{
+		Mode:              string(catalog.ProjectModeBackend),
+		Backend:           string(catalog.PackIDHonoNode),
+		Email:             string(catalog.EmailResend),
+		RecommendedSkills: true,
+	}
+
+	applySelectionConstraints(registry, &input)
+
+	if !input.RecommendedSkills {
+		t.Fatal("expected recommended skills to stay enabled when a selected addon provides skill assets")
+	}
+}
+
+func TestNormalizeValuePreservesExplicitNoneSelection(t *testing.T) {
+	if got := normalizeValue(" none "); got != "none" {
+		t.Fatalf("expected none to be preserved, got %q", got)
+	}
+}
+
+func TestApplyDerivedDefaultsPreservesExplicitNoneSelections(t *testing.T) {
+	registry := catalog.MustDefaultRegistry()
+	input := createInput{
+		Mode:           string(catalog.ProjectModeBackend),
+		Backend:        string(catalog.PackIDHonoNode),
+		PackageManager: string(catalog.PackageManagerPNPM),
+		Auth:           "none",
+		Database:       "none",
+		Storage:        "none",
+		Email:          "none",
+	}
+
+	applyDerivedDefaults(registry, &input)
+
+	if input.Auth != "none" {
+		t.Fatalf("expected auth none to be preserved, got %q", input.Auth)
+	}
+	if input.Database != "none" {
+		t.Fatalf("expected database none to be preserved, got %q", input.Database)
+	}
+	if input.Storage != "none" {
+		t.Fatalf("expected storage none to be preserved, got %q", input.Storage)
+	}
+	if input.Email != "none" {
+		t.Fatalf("expected email none to be preserved, got %q", input.Email)
+	}
+}
+
+func TestToSpecParsesExplicitNoneSelections(t *testing.T) {
+	spec, _, err := (createInput{
+		ProjectName:    "acme",
+		Mode:           string(catalog.ProjectModeBackend),
+		Backend:        string(catalog.PackIDHonoNode),
+		PackageManager: string(catalog.PackageManagerPNPM),
+		Auth:           "none",
+		Database:       "none",
+		Storage:        "none",
+		Email:          "none",
+	}).toSpec()
+	if err != nil {
+		t.Fatalf("toSpec returned error: %v", err)
+	}
+
+	if spec.Auth != catalog.AuthNone {
+		t.Fatalf("expected auth none, got %q", spec.Auth)
+	}
+	if spec.Database != catalog.DatabaseNone {
+		t.Fatalf("expected database none, got %q", spec.Database)
+	}
+	if spec.Storage != catalog.StorageNone {
+		t.Fatalf("expected storage none, got %q", spec.Storage)
+	}
+	if spec.Email != catalog.EmailNone {
+		t.Fatalf("expected email none, got %q", spec.Email)
 	}
 }
 

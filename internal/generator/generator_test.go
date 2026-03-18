@@ -123,6 +123,38 @@ func TestGenerateCopiesRecommendedSkillsWhenRequested(t *testing.T) {
 	assertFileContains(t, filepath.Join(targetDir, ".agents", "skills", "workers-best-practices", "references", "rules.md"), "compatibility_date")
 }
 
+func TestGenerateCopiesAddonSkillsWhenRequested(t *testing.T) {
+	registry := catalog.MustDefaultRegistry()
+	addonRegistry := catalog.MustDefaultAddonRegistry()
+	spec := resolver.ProjectSpec{
+		ProjectName:    "Acme API",
+		Mode:           catalog.ProjectModeBackend,
+		BackendPackID:  catalog.PackIDHonoNode,
+		PackageManager: catalog.PackageManagerPNPM,
+		Database:       catalog.DatabaseSupabase,
+		Auth:           catalog.AuthBetter,
+		Email:          catalog.EmailResend,
+	}
+
+	plan, err := resolver.Resolve(spec, registry)
+	if err != nil {
+		t.Fatalf("resolve returned error: %v", err)
+	}
+
+	targetDir := filepath.Join(t.TempDir(), "acme-api")
+	_, err = generator.Generate(spec, plan, registry, addonRegistry, generator.Options{
+		TargetDir:                targetDir,
+		IncludeRecommendedSkills: true,
+	})
+	if err != nil {
+		t.Fatalf("generate returned error: %v", err)
+	}
+
+	assertFileContains(t, filepath.Join(targetDir, ".agents", "skills", "better-auth", "SKILL.md"), "generated Better Auth integrations")
+	assertFileContains(t, filepath.Join(targetDir, ".agents", "skills", "supabase", "SKILL.md"), "generated Supabase auth or storage integrations")
+	assertFileContains(t, filepath.Join(targetDir, ".agents", "skills", "resend", "SKILL.md"), "generated Resend integrations")
+}
+
 func TestGenerateCreatesHonoNodeSnapshotWithDbStructure(t *testing.T) {
 	registry := catalog.MustDefaultRegistry()
 	addonRegistry := catalog.MustDefaultAddonRegistry()
@@ -306,6 +338,68 @@ func TestGenerateAppliesAddonForFastAPI(t *testing.T) {
 	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "app", "lib", "email.py"), "resend")
 }
 
+func TestGenerateAppliesManagedAddonsOnlyToBackendPack(t *testing.T) {
+	registry := catalog.MustDefaultRegistry()
+	addonRegistry := catalog.MustDefaultAddonRegistry()
+	spec := resolver.ProjectSpec{
+		ProjectName:    "Acme Platform",
+		Mode:           catalog.ProjectModeFullStack,
+		FrontendPackID: catalog.PackIDNextJS,
+		BackendPackID:  catalog.PackIDHonoNode,
+		PackageManager: catalog.PackageManagerPNPM,
+		Auth:           catalog.AuthBetter,
+		Database:       catalog.DatabasePostgres,
+		Storage:        catalog.StorageS3,
+		Email:          catalog.EmailResend,
+	}
+
+	plan, err := resolver.Resolve(spec, registry)
+	if err != nil {
+		t.Fatalf("resolve returned error: %v", err)
+	}
+
+	targetDir := filepath.Join(t.TempDir(), "acme-platform")
+	_, err = generator.Generate(spec, plan, registry, addonRegistry, generator.Options{TargetDir: targetDir})
+	if err != nil {
+		t.Fatalf("generate returned error: %v", err)
+	}
+
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "src", "lib", "email.ts"), "Resend")
+	assertPathMissing(t, filepath.Join(targetDir, "apps", "web", "src", "lib", "email.ts"))
+	assertFileContains(t, filepath.Join(targetDir, "apps", "api", "package.json"), "resend")
+	assertFileNotContains(t, filepath.Join(targetDir, "apps", "web", "package.json"), "resend")
+}
+
+func TestGenerateUsesSingleRootLayoutWhenNextJSHandlesFrontendAndBackend(t *testing.T) {
+	registry := catalog.MustDefaultRegistry()
+	addonRegistry := catalog.MustDefaultAddonRegistry()
+	spec := resolver.ProjectSpec{
+		ProjectName:    "Acme Platform",
+		Mode:           catalog.ProjectModeFullStack,
+		FrontendPackID: catalog.PackIDNextJS,
+		BackendPackID:  catalog.PackIDNextJS,
+		PackageManager: catalog.PackageManagerPNPM,
+		Email:          catalog.EmailResend,
+	}
+
+	plan, err := resolver.Resolve(spec, registry)
+	if err != nil {
+		t.Fatalf("resolve returned error: %v", err)
+	}
+
+	targetDir := filepath.Join(t.TempDir(), "acme-platform")
+	_, err = generator.Generate(spec, plan, registry, addonRegistry, generator.Options{TargetDir: targetDir})
+	if err != nil {
+		t.Fatalf("generate returned error: %v", err)
+	}
+
+	assertFileContains(t, filepath.Join(targetDir, "package.json"), "\"next\"")
+	assertFileContains(t, filepath.Join(targetDir, "src", "app", "page.tsx"), "Minimal Next.js baseline")
+	assertFileContains(t, filepath.Join(targetDir, "src", "lib", "email.ts"), "Resend")
+	assertPathMissing(t, filepath.Join(targetDir, "apps"))
+	assertPathMissing(t, filepath.Join(targetDir, "packages"))
+}
+
 func assertFileContains(t *testing.T, path string, expected string) {
 	t.Helper()
 
@@ -332,5 +426,18 @@ func assertPathMissing(t *testing.T, path string) {
 
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("expected path %q to be missing, got %v", path, err)
+	}
+}
+
+func assertFileNotContains(t *testing.T, path string, unexpected string) {
+	t.Helper()
+
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read file %q: %v", path, err)
+	}
+
+	if strings.Contains(string(contents), unexpected) {
+		t.Fatalf("expected file %q to not contain %q, got %q", path, unexpected, string(contents))
 	}
 }

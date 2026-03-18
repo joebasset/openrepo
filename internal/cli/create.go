@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/huh"
@@ -28,6 +29,7 @@ type createOptions struct {
 	gitInit           bool
 	install           bool
 	recommendedSkills bool
+	list              bool
 }
 
 type createSelections struct {
@@ -47,19 +49,19 @@ func newCreateCmd() *cobra.Command {
 	createCmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new project",
-		Long: `Scaffold a new monorepo with frontend and/or backend stacks.
-
-By default the command runs interactively, prompting for any choices you
-don't supply via flags. Pass --no-interactive to skip prompts and require
-all values as flags.
-
-Available stacks:
-  Frontend: nextjs, expo
-  Backend:  hono-node, hono-workers, fastapi, gin`,
+		Long:  "Scaffold a new monorepo with frontend and/or backend stacks.",
 		Example: `  openrepo create
+  openrepo create --list
   openrepo create --project-name my-app --mode fullstack
   openrepo create --project-name api --mode backend --backend hono-workers --no-interactive`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if options.list {
+				registry := catalog.MustDefaultRegistry()
+				addonRegistry := catalog.MustDefaultAddonRegistry()
+				cmd.Println(renderAvailableOptions(registry, addonRegistry))
+				return nil
+			}
+
 			if noInteractive {
 				options.interactive = false
 			}
@@ -73,6 +75,9 @@ Available stacks:
 			return runCreate(cmd, *options, flagState)
 		},
 	}
+	createCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		cmd.Println(renderCreateHelp())
+	})
 
 	createCmd.Flags().StringVar(&options.projectName, "project-name", "", "Name for the generated repository")
 	createCmd.Flags().StringVar(&options.mode, "mode", "", "Project mode (frontend, backend, fullstack)")
@@ -87,6 +92,7 @@ Available stacks:
 	createCmd.Flags().BoolVar(&options.gitInit, "git-init", true, "Initialize a git repository")
 	createCmd.Flags().BoolVar(&options.install, "install", true, "Install dependencies after scaffolding")
 	createCmd.Flags().BoolVar(&options.recommendedSkills, "recommended-skills", false, "Copy recommended skill bundles into .agents/skills")
+	createCmd.Flags().BoolVar(&options.list, "list", false, "List available packs and addon options")
 	createCmd.Flags().BoolVar(&noInteractive, "no-interactive", false, "Skip prompts and require all values as flags")
 
 	return createCmd
@@ -145,41 +151,56 @@ func runCreate(cmd *cobra.Command, options createOptions, flagState commandFlagS
 }
 
 func renderCreateSummary(spec resolver.ProjectSpec, selections createSelections, plan resolver.ResolvedPlan, registry catalog.Registry) string {
-	lines := []string{
-		fmt.Sprintf("Project: %s", spec.ProjectName),
-		fmt.Sprintf("Mode: %s", spec.Mode),
-		fmt.Sprintf("Workspace strategy: %s", plan.WorkspaceStrategy),
-		fmt.Sprintf("Initialize git: %t", selections.InitializeGit),
-		fmt.Sprintf("Install dependencies: %t", selections.InstallDependencies),
-		fmt.Sprintf("Recommended skills: %t", selections.IncludeRecommendedSkills),
+	overview := []string{
+		fmt.Sprintf("project=%s", spec.ProjectName),
+		fmt.Sprintf("mode=%s", spec.Mode),
+		fmt.Sprintf("workspace=%s", plan.WorkspaceStrategy),
 	}
 
+	stacks := make([]string, 0, 2)
 	if spec.FrontendPackID != "" {
-		lines = append(lines, fmt.Sprintf("Frontend: %s", registry.MustGet(spec.FrontendPackID).DisplayName))
+		stacks = append(stacks, fmt.Sprintf("frontend=%s", registry.MustGet(spec.FrontendPackID).DisplayName))
 	}
-
 	if spec.BackendPackID != "" {
-		lines = append(lines, fmt.Sprintf("Backend: %s", registry.MustGet(spec.BackendPackID).DisplayName))
+		stacks = append(stacks, fmt.Sprintf("backend=%s", registry.MustGet(spec.BackendPackID).DisplayName))
 	}
 
+	tooling := []string{
+		fmt.Sprintf("git=%s", yesNo(selections.InitializeGit)),
+		fmt.Sprintf("install=%s", yesNo(selections.InstallDependencies)),
+		fmt.Sprintf("skills=%s", yesNo(selections.IncludeRecommendedSkills)),
+	}
 	if spec.PackageManager != catalog.PackageManagerNone {
-		lines = append(lines, fmt.Sprintf("Package manager: %s", spec.PackageManager))
+		tooling = append(tooling, fmt.Sprintf("package-manager=%s", spec.PackageManager))
 	}
 
+	integrations := make([]string, 0, 4)
 	if spec.Mode != catalog.ProjectModeFrontend {
-		lines = append(lines,
-			fmt.Sprintf("Database: %s", displayValue(string(spec.Database), "none")),
-			fmt.Sprintf("Auth: %s", displayValue(string(spec.Auth), "none")),
-			fmt.Sprintf("Storage: %s", displayValue(string(spec.Storage), "none")),
-			fmt.Sprintf("Email: %s", displayValue(string(spec.Email), "none")),
+		integrations = append(integrations,
+			fmt.Sprintf("database=%s", displayValue(string(spec.Database), "none")),
+			fmt.Sprintf("auth=%s", displayValue(string(spec.Auth), "none")),
+			fmt.Sprintf("storage=%s", displayValue(string(spec.Storage), "none")),
+			fmt.Sprintf("email=%s", displayValue(string(spec.Email), "none")),
 		)
 	}
 
-	lines = append(lines, fmt.Sprintf("Shared types package: %t", plan.CreateSharedTypes))
-
+	extras := []string{fmt.Sprintf("shared-types=%s", yesNo(plan.CreateSharedTypes))}
 	if spec.BackendPackID == catalog.PackIDHonoWorkers {
-		lines = append(lines, "Cloudflare bindings: Wrangler dev/staging/production auto-provisioned D1 + KV + R2")
+		extras = append(extras, "cloudflare-bindings=dev|staging|production with d1|kv|r2")
 	}
+
+	lines := []string{
+		"Summary",
+		fmt.Sprintf("  %s", strings.Join(overview, "  ")),
+	}
+	if len(stacks) > 0 {
+		lines = append(lines, fmt.Sprintf("  %s", strings.Join(stacks, "  ")))
+	}
+	lines = append(lines, fmt.Sprintf("  %s", strings.Join(tooling, "  ")))
+	if len(integrations) > 0 {
+		lines = append(lines, fmt.Sprintf("  %s", strings.Join(integrations, "  ")))
+	}
+	lines = append(lines, fmt.Sprintf("  %s", strings.Join(extras, "  ")))
 
 	return strings.Join(lines, "\n")
 }
@@ -190,6 +211,77 @@ func displayValue(value string, fallback string) string {
 	}
 
 	return value
+}
+
+func yesNo(value bool) string {
+	if value {
+		return "yes"
+	}
+
+	return "no"
+}
+
+func renderCreateHelp() string {
+	sections := []string{
+		"openrepo create",
+		"  Scaffold a new project.",
+		"",
+		"Usage",
+		"  openrepo create [flags]",
+		"",
+		"Quick start",
+		"  openrepo create",
+		"  openrepo create --list",
+		"  openrepo create --project-name my-app --mode fullstack --frontend nextjs --backend hono-node",
+		"",
+		"Packs",
+		"  frontend: nextjs, expo",
+		"  backend:  nextjs, hono-node, hono-workers, fastapi, gin",
+		"",
+		"Options",
+		"  mode:            frontend, backend, fullstack",
+		"  package-manager: npm, pnpm, bun, yarn",
+		"  database:        postgres, sqlite, supabase, d1, none",
+		"  auth:            better-auth, supabase-auth, none",
+		"  storage:         r2, s3, supabase-storage, none",
+		"  email:           resend, none",
+		"",
+		"Flags",
+	}
+
+	type helpFlag struct {
+		name        string
+		description string
+	}
+
+	flags := []helpFlag{
+		{name: "--project-name", description: "Repository name"},
+		{name: "--mode", description: "Project mode"},
+		{name: "--frontend", description: "Frontend pack"},
+		{name: "--backend", description: "Backend pack"},
+		{name: "--package-manager", description: "JS package manager"},
+		{name: "--database", description: "Database option"},
+		{name: "--auth", description: "Auth option"},
+		{name: "--storage", description: "Storage option"},
+		{name: "--email", description: "Email option"},
+		{name: "--output-dir", description: "Output path"},
+		{name: "--recommended-skills", description: "Copy recommended skill bundles"},
+		{name: "--git-init", description: "Initialize git (default: true)"},
+		{name: "--install", description: "Install dependencies (default: true)"},
+		{name: "--no-interactive", description: "Disable prompts"},
+		{name: "--list", description: "Show available packs and addon support"},
+		{name: "--help", description: "Show help"},
+	}
+
+	slices.SortFunc(flags, func(a, b helpFlag) int {
+		return strings.Compare(a.name, b.name)
+	})
+
+	for _, flag := range flags {
+		sections = append(sections, fmt.Sprintf("  %-20s %s", flag.name, flag.description))
+	}
+
+	return strings.Join(sections, "\n")
 }
 
 func runPromptForm(cmd *cobra.Command, fields ...huh.Field) error {

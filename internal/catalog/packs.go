@@ -51,9 +51,6 @@ func nextJSPack() Pack {
 			{Title: "App Router", Instruction: "Prefer the App Router and colocate route handlers with the feature they serve."},
 			{Title: "Server Boundaries", Instruction: "Keep server-only code out of client components and isolate browser code behind explicit client entrypoints."},
 		},
-		RequiredSkills: []SkillRequirement{
-			{Name: "web-perf", InstallHint: "npx skills add web-perf"},
-		},
 		SkillAssets: &SkillAssetBundle{
 			Path: "assets/skills/nextjs",
 		},
@@ -113,7 +110,6 @@ func expoPack() Pack {
 			{Title: "Expo First", Instruction: "Use Expo-managed APIs before adding native modules or ejecting."},
 			{Title: "Platform Boundaries", Instruction: "Keep shared UI logic portable and isolate platform-specific behavior behind small adapters."},
 		},
-		RequiredSkills: []SkillRequirement{},
 		Capabilities: PackCapabilities{
 			ProvidesServerRuntime: false,
 			UsesTypeScript:        true,
@@ -169,7 +165,6 @@ func honoNodePack() Pack {
 			{Title: "Thin Handlers", Instruction: "Keep Hono route handlers thin and move business logic into isolated services."},
 			{Title: "Runtime Safety", Instruction: "Treat request parsing and environment access as explicit boundaries and validate them early."},
 		},
-		RequiredSkills: []SkillRequirement{},
 		Capabilities: PackCapabilities{
 			ProvidesServerRuntime: true,
 			UsesTypeScript:        true,
@@ -235,10 +230,6 @@ func honoWorkersPack() Pack {
 			{Title: "Workers Runtime", Instruction: "Stay within Cloudflare Workers runtime constraints and avoid Node-only APIs unless explicitly configured."},
 			{Title: "Bindings First", Instruction: "Represent external services through Wrangler bindings and keep environment access centralized."},
 		},
-		RequiredSkills: []SkillRequirement{
-			{Name: "wrangler", InstallHint: "npx skills add wrangler"},
-			{Name: "workers-best-practices", InstallHint: "npx skills add workers-best-practices"},
-		},
 		SkillAssets: &SkillAssetBundle{
 			Path: "assets/skills/hono-workers",
 		},
@@ -297,7 +288,6 @@ func fastAPIPack() Pack {
 			{Title: "Router Composition", Instruction: "Group FastAPI routes by feature and keep dependency wiring close to the boundary layer."},
 			{Title: "Type Safety", Instruction: "Use Pydantic models and typed function signatures for request and response boundaries."},
 		},
-		RequiredSkills: []SkillRequirement{},
 		Capabilities: PackCapabilities{
 			ProvidesServerRuntime: true,
 			SupportsDatabase:      true,
@@ -342,7 +332,6 @@ func ginPack() Pack {
 			{Title: "Thin Transport Layer", Instruction: "Keep Gin handlers thin and push domain logic into separate packages."},
 			{Title: "Dependency Wiring", Instruction: "Construct dependencies in main and pass them explicitly into HTTP handlers."},
 		},
-		RequiredSkills: []SkillRequirement{},
 		Capabilities: PackCapabilities{
 			ProvidesServerRuntime: true,
 			SupportsDatabase:      true,

@@ -135,11 +135,6 @@ type AgentRule struct {
 	Instruction string
 }
 
-type SkillRequirement struct {
-	Name        string
-	InstallHint string
-}
-
 type SkillAssetBundle struct {
 	Path string
 }
@@ -171,23 +166,22 @@ type PackCapabilities struct {
 }
 
 type Pack struct {
-	ID             PackID
-	DisplayName    string
-	Category       PackCategory
-	Language       Language
-	Runtime        Runtime
-	OutputDir      string
-	Strategy       PackStrategy
-	Description    string
-	Files          []ManagedFile
-	EnvVars        []EnvVar
-	Scripts        []Script
-	AgentRules     []AgentRule
-	RequiredSkills []SkillRequirement
-	SkillAssets    *SkillAssetBundle
-	Capabilities   PackCapabilities
-	External       *ExternalScaffold
-	Local          *LocalTemplate
+	ID           PackID
+	DisplayName  string
+	Category     PackCategory
+	Language     Language
+	Runtime      Runtime
+	OutputDir    string
+	Strategy     PackStrategy
+	Description  string
+	Files        []ManagedFile
+	EnvVars      []EnvVar
+	Scripts      []Script
+	AgentRules   []AgentRule
+	SkillAssets  *SkillAssetBundle
+	Capabilities PackCapabilities
+	External     *ExternalScaffold
+	Local        *LocalTemplate
 }
 
 type IntegrationKind string
@@ -217,6 +211,7 @@ type Addon struct {
 	EnvVars          []EnvVar
 	AgentRules       []AgentRule
 	Scripts          map[string]string
+	SkillAssets      *SkillAssetBundle
 }
 
 func (p Pack) SupportsCategory(cat PackCategory) bool {

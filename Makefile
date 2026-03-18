@@ -1,4 +1,4 @@
-.PHONY: test refresh-all refresh-templates refresh-nextjs refresh-hono-node refresh-hono-workers refresh-skill-assets refresh-skills-nextjs refresh-skills-hono-node refresh-skills-hono-workers
+.PHONY: test refresh-all refresh-templates refresh-nextjs refresh-hono-node refresh-hono-workers refresh-skill-assets refresh-skills-nextjs refresh-skills-hono-node refresh-skills-hono-workers refresh-skills-better-auth refresh-skills-supabase refresh-skills-resend
 
 test:
 	go test ./...
@@ -30,3 +30,12 @@ refresh-skills-hono-node:
 
 refresh-skills-hono-workers:
 	./scripts/skills/install-hono-workers.sh
+
+refresh-skills-better-auth:
+	./scripts/skills/install-better-auth.sh
+
+refresh-skills-supabase:
+	./scripts/skills/install-supabase.sh
+
+refresh-skills-resend:
+	./scripts/skills/install-resend.sh

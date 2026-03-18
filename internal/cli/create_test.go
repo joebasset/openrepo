@@ -37,10 +37,11 @@ func TestCreateCommandCreatesLocalTemplateProject(t *testing.T) {
 
 	output := stdout.String()
 	for _, expected := range []string{
-		"Project: acme",
-		"Mode: backend",
-		"Workspace strategy: native",
-		"Backend: Gin",
+		"Summary",
+		"project=acme",
+		"mode=backend",
+		"workspace=native",
+		"backend=Gin",
 		"Created project at " + outputDir,
 	} {
 		if !strings.Contains(output, expected) {
@@ -123,20 +124,21 @@ func TestCreateCommandCreatesSnapshotFullstackProject(t *testing.T) {
 
 	output := stdout.String()
 	for _, expected := range []string{
-		"Project: test-repo",
-		"Mode: fullstack",
-		"Workspace strategy: turbo",
-		"Initialize git: true",
-		"Install dependencies: true",
-		"Frontend: Next.js",
-		"Backend: Hono (Cloudflare Workers)",
-		"Package manager: pnpm",
-		"Database: d1",
-		"Auth: better-auth",
-		"Storage: r2",
-		"Email: resend",
-		"Shared types package: true",
-		"Cloudflare bindings: Wrangler dev/staging/production auto-provisioned D1 + KV + R2",
+		"Summary",
+		"project=test-repo",
+		"mode=fullstack",
+		"workspace=turbo",
+		"git=yes",
+		"install=yes",
+		"frontend=Next.js",
+		"backend=Hono (Cloudflare Workers)",
+		"package-manager=pnpm",
+		"database=d1",
+		"auth=better-auth",
+		"storage=r2",
+		"email=resend",
+		"shared-types=yes",
+		"cloudflare-bindings=dev|staging|production with d1|kv|r2",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("expected output to contain %q, got %q", expected, output)
@@ -152,6 +154,57 @@ func TestCreateCommandCreatesSnapshotFullstackProject(t *testing.T) {
 	} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected generated file %q to exist: %v", path, err)
+		}
+	}
+}
+
+func TestCreateCommandPreservesExplicitNoneAddonSelections(t *testing.T) {
+	outputDir := filepath.Join(t.TempDir(), "acme")
+
+	cmd := cli.NewRootCmd()
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{
+		"create",
+		"--no-interactive",
+		"--project-name", "acme",
+		"--mode", "backend",
+		"--backend", "hono-node",
+		"--package-manager", "pnpm",
+		"--auth", "none",
+		"--database", "none",
+		"--storage", "none",
+		"--email", "none",
+		"--git-init=false",
+		"--install=false",
+		"--output-dir", outputDir,
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected command to succeed, got %v", err)
+	}
+
+	output := stdout.String()
+	for _, expected := range []string{
+		"database=none",
+		"auth=none",
+		"storage=none",
+		"email=none",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected output to contain %q, got %q", expected, output)
+		}
+	}
+
+	packageJSON, err := os.ReadFile(filepath.Join(outputDir, "apps", "api", "package.json"))
+	if err != nil {
+		t.Fatalf("read package.json: %v", err)
+	}
+
+	for _, unexpected := range []string{"better-auth", "resend", "@aws-sdk/client-s3"} {
+		if strings.Contains(string(packageJSON), unexpected) {
+			t.Fatalf("expected package.json to not contain %q, got %q", unexpected, string(packageJSON))
 		}
 	}
 }
@@ -181,7 +234,7 @@ func TestCreateCommandCopiesRecommendedSkillsWhenRequested(t *testing.T) {
 	}
 
 	output := stdout.String()
-	if !strings.Contains(output, "Recommended skills: true") {
+	if !strings.Contains(output, "skills=yes") {
 		t.Fatalf("expected output to mention recommended skills, got %q", output)
 	}
 
@@ -192,6 +245,63 @@ func TestCreateCommandCopiesRecommendedSkillsWhenRequested(t *testing.T) {
 	} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected generated file %q to exist: %v", path, err)
+		}
+	}
+}
+
+func TestCreateCommandListsAvailableOptions(t *testing.T) {
+	cmd := cli.NewRootCmd()
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"create", "--list"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected list command to succeed, got %v", err)
+	}
+
+	output := stdout.String()
+	for _, expected := range []string{
+		"Packs",
+		"frontend: expo, nextjs",
+		"backend:  fastapi, gin, hono-workers, hono-node, nextjs",
+		"Pack details",
+		"nextjs       Next.js",
+		"Options",
+		"database:        postgres, sqlite, supabase, d1, none",
+		"Addon support",
+		"nextjs       database=supabase  auth=better-auth|supabase-auth  storage=r2|s3|supabase-storage  email=resend",
+		"gin          database=supabase  auth=supabase-auth  storage=r2|s3|supabase-storage  email=resend",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected output to contain %q, got %q", expected, output)
+		}
+	}
+}
+
+func TestCreateHelpIsCompactAndStructured(t *testing.T) {
+	cmd := cli.NewRootCmd()
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"create", "--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected help command to succeed, got %v", err)
+	}
+
+	output := stdout.String()
+	for _, expected := range []string{
+		"openrepo create",
+		"Usage",
+		"Quick start",
+		"Packs",
+		"Options",
+		"Flags",
+		"--list",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected help output to contain %q, got %q", expected, output)
 		}
 	}
 }

@@ -37,6 +37,10 @@ func Resolve(spec ProjectSpec, registry catalog.Registry) (ResolvedPlan, error) 
 		CreateSharedTypes: false,
 	}
 
+	if usesSinglePackLayout(spec) {
+		return plan, nil
+	}
+
 	allTypeScript := true
 	for _, pack := range packs {
 		if !pack.Capabilities.UsesTypeScript {
@@ -56,6 +60,12 @@ func Resolve(spec ProjectSpec, registry catalog.Registry) (ResolvedPlan, error) 
 	}
 
 	return plan, nil
+}
+
+func usesSinglePackLayout(spec ProjectSpec) bool {
+	return spec.Mode == catalog.ProjectModeFullStack &&
+		spec.FrontendPackID != "" &&
+		spec.FrontendPackID == spec.BackendPackID
 }
 
 func Validate(spec ProjectSpec, registry catalog.Registry) error {

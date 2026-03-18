@@ -54,6 +54,29 @@ func TestResolveUsesNativeForMixedLanguageFullStack(t *testing.T) {
 	}
 }
 
+func TestResolveUsesNativeSinglePackLayoutForSharedNextJSApp(t *testing.T) {
+	registry := catalog.MustDefaultRegistry()
+
+	plan, err := resolver.Resolve(resolver.ProjectSpec{
+		ProjectName:    "acme",
+		Mode:           catalog.ProjectModeFullStack,
+		FrontendPackID: catalog.PackIDNextJS,
+		BackendPackID:  catalog.PackIDNextJS,
+		PackageManager: catalog.PackageManagerPNPM,
+	}, registry)
+	if err != nil {
+		t.Fatalf("resolve returned error: %v", err)
+	}
+
+	if plan.WorkspaceStrategy != catalog.WorkspaceStrategyNative {
+		t.Fatalf("expected native strategy for shared next.js app, got %q", plan.WorkspaceStrategy)
+	}
+
+	if plan.CreateSharedTypes {
+		t.Fatal("did not expect shared types for a single-pack fullstack project")
+	}
+}
+
 func TestValidateRejectsUnsupportedExpoPackageManager(t *testing.T) {
 	registry := catalog.MustDefaultRegistry()
 

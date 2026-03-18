@@ -39,7 +39,7 @@ func TestRenderRootReadmeSkipsRootInstallForNativeWorkspace(t *testing.T) {
 }
 
 func TestRenderMakefileRunsConcurrentDevCommands(t *testing.T) {
-	makefile := renderMakefile([]catalog.Pack{
+	makefile := renderMakefile(resolver.ProjectSpec{}, []catalog.Pack{
 		{
 			OutputDir: "apps/web",
 			Scripts: []catalog.Script{
