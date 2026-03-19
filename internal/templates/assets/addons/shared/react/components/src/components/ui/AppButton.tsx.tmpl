@@ -1,0 +1,30 @@
+{{- if eq .Components "mui" }}
+import Button from "@mui/material/Button";
+import type { ReactNode } from "react";
+
+type AppButtonProps = {
+  children: ReactNode;
+};
+
+export function AppButton({ children }: AppButtonProps) {
+  return <Button variant="contained">{children}</Button>;
+}
+{{- else }}
+import type { ButtonHTMLAttributes, PropsWithChildren } from "react";
+
+type AppButtonProps = PropsWithChildren<ButtonHTMLAttributes<HTMLButtonElement>>;
+
+export function AppButton({ children, className, ...props }: AppButtonProps) {
+  return (
+    <button
+      className={["inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium", className]
+        .filter(Boolean)
+        .join(" ")}
+      type="button"
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+{{- end }}

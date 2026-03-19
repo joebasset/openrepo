@@ -1,0 +1,11 @@
+<?php
+
+namespace App\Support;
+
+class DatabaseService
+{
+    public static function driver(): string
+    {
+        return '{{ .Database }}';
+    }
+}

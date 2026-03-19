@@ -1,0 +1,9 @@
+package email
+
+{{- if eq .Email "resend" }}
+import "github.com/resend/resend-go/v2"
+
+func Client(apiKey string) *resend.Client {
+	return resend.NewClient(apiKey)
+}
+{{- end }}

@@ -15,13 +15,7 @@ trap cleanup EXIT
 
 (
   cd "$WORK_DIR"
-  printf 'n\n' | pnpm create hono@latest app --template nodejs --pm pnpm
-)
-
-(
-  cd "$APP_DIR"
-  pnpm add @hono/node-server drizzle-orm postgres zod
-  pnpm add -D @biomejs/biome @types/node drizzle-kit tsx typescript vitest
+  printf 'n\n' | CI=1 pnpm create hono@latest app --template nodejs --pm pnpm
 )
 
 rm -rf "$ASSET_DIR"

@@ -1,0 +1,21 @@
+package auth
+
+{{- if eq .Auth "firebase-auth" }}
+import firebase "firebase.google.com/go/v4/auth"
+
+func Verifier(client *firebase.Client) *firebase.Client {
+	return client
+}
+{{- else if eq .Auth "supabase-auth" }}
+type Config struct {
+	URL     string
+	AnonKey string
+}
+
+func NewConfig(url string, anonKey string) Config {
+	return Config{
+		URL:     url,
+		AnonKey: anonKey,
+	}
+}
+{{- end }}

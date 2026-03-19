@@ -1,0 +1,11 @@
+<?php
+
+namespace App\Support;
+
+class StorageService
+{
+    public static function driver(): string
+    {
+        return '{{ .Storage }}';
+    }
+}

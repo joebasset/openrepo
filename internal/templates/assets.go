@@ -4,7 +4,7 @@ import "embed"
 
 // Assets stores local generator templates for stacks that do not have an upstream initializer.
 //
-//go:embed assets/**
+//go:embed all:assets/**
 var Assets embed.FS
 
 func Exists(path string) bool {

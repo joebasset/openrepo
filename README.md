@@ -1,6 +1,6 @@
 # openrepo
 
-CLI tool that scaffolds fullstack monorepos with opinionated defaults. Pick a frontend, backend, auth provider, database, storage, and email — openrepo generates the project structure, wires up integrations, and installs dependencies.
+CLI tool that scaffolds opinionated full-stack repos. Pick a frontend pack, backend pack, required foundations like database and ORM, then layer on compatible optional addons and skills.
 
 ## Install
 
@@ -17,14 +17,15 @@ openrepo create
 # Fully non-interactive
 openrepo create \
   --project-name my-app \
-  --mode fullstack \
-  --frontend nextjs \
-  --backend hono-node \
+  --fe nextjs \
+  --be hono-node \
   --package-manager pnpm \
-  --database postgres \
-  --auth better-auth \
-  --storage s3 \
-  --email resend \
+  --db postgres \
+  --orm drizzle \
+  --lint biome \
+  --tests vitest \
+  --tailwind tailwindcss \
+  --add-addon auth:better-auth,email:resend \
   --no-interactive
 ```
 
@@ -61,64 +62,112 @@ When Next.js is selected as both frontend and backend in fullstack mode, openrep
 
 | Pack | ID | Language | Output | Notes |
 |------|----|----------|--------|-------|
-| Next.js | `nextjs` | TypeScript | `apps/web` | App Router, Tailwind, Vitest. Can also be used as backend (API routes). |
+| Next.js | `nextjs` | TypeScript | `apps/web` | App Router, Tailwind-ready, Vitest. Can also be used as backend (API routes). |
+| React | `react` | TypeScript | `apps/web` | Vite + Vitest frontend. |
+| Vue | `vue` | TypeScript | `apps/web` | Vue + Vite + Vitest frontend. |
 | Expo | `expo` | TypeScript | `apps/mobile` | Blank TypeScript template via `create-expo-app`. |
+| Ionic React | `ionic-react` | TypeScript | `apps/mobile` | Ionic React frontend. |
+| TanStack Start | `tanstack-start` | TypeScript | `apps/web` | React app with full-stack-capable runtime. |
 
 ### Backend
 
 | Pack | ID | Language | Output | Notes |
 |------|----|----------|--------|-------|
-| Next.js | `nextjs` | TypeScript | `apps/web` or repo root | Same pack as frontend — use for backend-only or fullstack with API routes. |
-| Hono (Node.js) | `hono-node` | TypeScript | `apps/api` | Drizzle ORM, Vitest, tsx. |
+| Next.js | `nextjs` | TypeScript | `apps/web` or repo root | Same pack as frontend — use when you want API routes in the app itself. |
+| TanStack Start | `tanstack-start` | TypeScript | `apps/web` or repo root | Same pack as frontend — use when you want a single-pack full-stack app. |
+| Hono (Node.js) | `hono-node` | TypeScript | `apps/api` | TypeScript API with Hono. |
 | Hono (Workers) | `hono-workers` | TypeScript | `apps/api` | D1 + KV + R2 bindings, Wrangler envs. Database locked to D1, storage locked to R2. |
-| FastAPI | `fastapi` | Python | `apps/api` | uv, Ruff, pytest. |
-| Gin | `gin` | Go | `apps/api` | go-blueprint-style setup, table-driven tests. |
+| FastAPI | `fastapi` | Python | `apps/api` | Python API with FastAPI. |
+| Gin | `gin` | Go | `apps/api` | Go API with Gin. |
+| Laravel | `laravel` | PHP | `apps/api` | Laravel backend scaffold. |
 
-When Next.js is selected as both frontend and backend in fullstack mode, a single repo-root Next.js app is generated (no duplication).
+When the same FE/BE pack is selected for a backend-capable frontend like Next.js, openrepo generates a single repo-root app instead of duplicating `apps/`.
 
-## Integration options
+## Foundations
 
-These are chosen during project creation. Each choice generates integration-specific source files, dependencies, env vars, and agent rules via the addon system.
-
-Optional integrations can also be set to `none` in either the interactive UI or via flags. Explicit `none` selections are preserved and will not be replaced by recommended defaults later in the flow.
+These are chosen during project creation before optional addons. Each foundation is context-aware and only shows values supported by the current FE/BE combination.
 
 ### Database
 
 | Option | ID | Notes |
 |--------|----|-------|
-| PostgreSQL | `postgres` | Default for non-Workers backends. |
+| PostgreSQL | `postgres` | Default for most server backends. |
+| MySQL | `mysql` | Supported where the selected backend supports it. |
 | SQLite | `sqlite` | Local file-based. |
 | Supabase | `supabase` | Managed Postgres via Supabase. |
-| Cloudflare D1 | `d1` | Required and auto-locked for Workers. |
+| MongoDB | `mongodb` | Supported where the selected backend supports it. |
+| Firebase | `firebase` | Firebase-backed data access where supported. |
+| Cloudflare D1 | `d1` | Required for Workers. |
 
-Database branching is handled by base template conditionals (e.g. the Drizzle config switches between `postgres-js` and `better-sqlite3` drivers).
+### ORM
+
+| Option | ID | Notes |
+|--------|----|-------|
+| Drizzle | `drizzle` | TypeScript-first ORM for supported TS backends. |
+| Prisma | `prisma` | Available for selected Node-based backends. |
+| SQLAlchemy | `sqlalchemy` | FastAPI foundation. |
+| GORM | `gorm` | Gin foundation. |
+| Eloquent | `eloquent` | Laravel foundation. |
+
+### Lint / format
+
+| Option | ID | Notes |
+|--------|----|-------|
+| Biome | `biome` | Default for TypeScript stacks. |
+| Ruff | `ruff` | FastAPI foundation. |
+| gofmt | `gofmt` | Gin foundation. |
+| Pint | `pint` | Laravel foundation. |
+
+### Tests
+
+| Option | ID | Notes |
+|--------|----|-------|
+| Vitest | `vitest` | Default for TypeScript stacks. |
+| Pytest | `pytest` | FastAPI foundation. |
+| go test | `go-test` | Gin foundation. |
+| PHPUnit | `phpunit` | Laravel foundation. |
+
+### Tailwind
+
+Tailwind is treated as a required frontend foundation for packs that support it. Right now that means packs like Next.js that already expose a Tailwind-ready scaffold.
+
+## Optional addons
 
 ### Auth
 
 | Option | ID | Notes |
 |--------|----|-------|
-| Better Auth | `better-auth` | Requires a TypeScript backend with server runtime. Generates auth config, middleware, route handler, and Drizzle schema. |
-| Supabase Auth | `supabase-auth` | Works with all packs. Generates client and JWT validation middleware. |
+| Better Auth | `auth:better-auth` | Context-aware. For Hono Node it resolves differently for Drizzle vs Prisma. |
+| Supabase Auth | `auth:supabase-auth` | Server/client integration where supported. |
+| Firebase Auth | `auth:firebase-auth` | Firebase-backed auth where supported. |
 
 ### Storage
 
 | Option | ID | Notes |
 |--------|----|-------|
-| Amazon S3 | `s3` | Standard AWS SDK client. |
-| Cloudflare R2 | `r2` | Uses S3-compatible API with R2 endpoint. Required for Workers. |
-| Supabase Storage | `supabase-storage` | Supabase's managed storage via `@supabase/supabase-js`. |
-
-> **Note:** R2 outside of Workers uses the S3-compatible API (`@aws-sdk/client-s3` pointed at `r2.cloudflarestorage.com`). This is Cloudflare's official recommendation — there is no standalone R2 SDK for Node.js/Python/Go. Inside Workers, R2 is accessed via native Wrangler bindings instead.
+| Amazon S3 | `storage:s3` | Standard AWS SDK client. |
+| Cloudflare R2 | `storage:r2` | Uses S3-compatible API with R2 endpoint. |
+| Supabase Storage | `storage:supabase-storage` | Supabase-managed storage. |
+| Firebase Storage | `storage:firebase-storage` | Firebase-backed storage where supported. |
 
 ### Email
 
 | Option | ID | Notes |
 |--------|----|-------|
-| Resend | `resend` | Generates a typed email client. |
+| Resend | `email:resend` | Generates a typed email client. |
+
+### UI
+
+| Option | ID | Notes |
+|--------|----|-------|
+| Lucide React | `icons:lucide-react` | Shared icon helper where supported. |
+| React Icons | `icons:react-icons` | Alternate icon library. |
+| shadcn/ui | `components:shadcn` | Shared UI component starter where supported. |
+| Material UI | `components:mui` | Material UI starter where supported. |
 
 ## Workspace strategy
 
-Determined automatically based on selected packs:
+Determined automatically based on the selected FE/BE combination:
 
 - **Turbo** — when all packs use TypeScript. Generates `package.json` + `turbo.json` + optional `pnpm-workspace.yaml` at root. Tasks run via `pnpm dev`, `pnpm test`, etc.
 - **Native** — when packs use mixed languages (e.g. Next.js + FastAPI). Generates a root `Makefile` that orchestrates per-app commands. Concurrent `make dev` for multi-app setups.
@@ -132,18 +181,28 @@ openrepo create [flags]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--project-name` | string | | Repository name |
-| `--mode` | string | | `frontend`, `backend`, or `fullstack` |
-| `--frontend` | string | | `nextjs` or `expo` |
-| `--backend` | string | | `hono-node`, `hono-workers`, `fastapi`, or `gin` |
+| `--fe` | string | | Frontend pack id |
+| `--be` | string | | Backend pack id |
 | `--package-manager` | string | | `npm`, `pnpm`, `bun`, or `yarn` |
-| `--database` | string | | `postgres`, `sqlite`, `supabase`, `d1`, or `none` |
-| `--auth` | string | | `better-auth`, `supabase-auth`, or `none` |
-| `--storage` | string | | `s3`, `r2`, `supabase-storage`, or `none` |
-| `--email` | string | | `resend` or `none` |
+| `--db` | string | | Database foundation |
+| `--orm` | string | | ORM foundation |
+| `--lint` | string | | Lint / format foundation |
+| `--tests` | string | | Test foundation |
+| `--tailwind` | string | | Tailwind foundation for supported frontend packs |
+| `--add-addon` | string array | | Optional addon id, repeatable or comma-separated |
 | `--output-dir` | string | `./<name>` | Output directory |
 | `--git-init` | bool | `true` | Initialize a git repository |
 | `--install` | bool | `true` | Install dependencies |
 | `--recommended-skills` | bool | `false` | Copy pack and addon skill bundles into `.agents/skills` |
+| `--list` | bool | `false` | Show grouped FE / BE / foundations / addons |
+| `--list-fe` | bool | `false` | Show frontend packs |
+| `--list-be` | bool | `false` | Show backend packs |
+| `--list-db` | bool | `false` | Show database foundations |
+| `--list-orms` | bool | `false` | Show ORM foundations |
+| `--list-lint` | bool | `false` | Show lint foundations |
+| `--list-tests` | bool | `false` | Show test foundations |
+| `--list-tailwind` | bool | `false` | Show Tailwind foundations |
+| `--list-addons` | bool | `false` | Show compatible optional addons |
 | `--no-interactive` | bool | `false` | Skip prompts, require all values as flags |
 
 ## Interactive prompt flow
@@ -151,19 +210,18 @@ openrepo create [flags]
 When running interactively, openrepo prompts in this order:
 
 1. Project name
-2. Mode (fullstack / frontend / backend)
-3. Frontend stack (if applicable)
-4. Backend stack (if applicable)
-5. Package manager (if TypeScript packs selected)
-6. Database (if backend selected)
-7. Auth (if backend selected)
-8. Storage (if backend selected)
-9. Email (if backend selected)
-10. Initialize git
-11. Install dependencies
-12. Include recommended skills (if selected packs or addons have skill assets)
-13. Review — confirm or jump back to change any choice
+2. Frontend pack
+3. Backend pack
+4. Package manager
+5. Database
+6. ORM
+7. Lint / formatter
+8. Tests
+9. Tailwind when the selected frontend supports it
+10. Optional addons
+11. Include recommended skills
+12. Review / create
 
-Each step shows a recommended default. Choices that are incompatible with earlier selections are hidden automatically (e.g. Workers locks database to D1). Selecting `None` for an optional integration is treated as an explicit opt-out and is preserved during review and generation.
+Each step shows only values compatible with the current FE/BE/foundation picture. Skills are never chosen directly; they are derived from the selected packs, foundations, and addons.
 
 ---

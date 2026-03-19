@@ -1,0 +1,33 @@
+{{- if or (eq .Database "postgres") (eq .Database "mysql") (eq .Database "sqlite") (eq .Database "supabase") }}
+import os
+
+from sqlalchemy import create_engine
+
+DATABASE_URL = os.getenv("DATABASE_URL", "{{ if eq .Database "sqlite" }}sqlite:///./app.db{{ end }}")
+engine = create_engine(DATABASE_URL)
+{{- else if eq .Database "mongodb" }}
+import os
+
+from pymongo import MongoClient
+
+client = MongoClient(os.getenv("MONGODB_URI", "mongodb://localhost:27017/app"))
+database = client.get_default_database()
+{{- else if eq .Database "firebase" }}
+import os
+
+import firebase_admin
+from firebase_admin import credentials, firestore
+
+if not firebase_admin._apps:
+    firebase_admin.initialize_app(
+        credentials.Certificate(
+            {
+                "project_id": os.getenv("FIREBASE_PROJECT_ID"),
+                "client_email": os.getenv("FIREBASE_CLIENT_EMAIL"),
+                "private_key": os.getenv("FIREBASE_PRIVATE_KEY"),
+            }
+        )
+    )
+
+database = firestore.client()
+{{- end }}

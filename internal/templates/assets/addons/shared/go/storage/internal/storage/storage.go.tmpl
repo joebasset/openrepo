@@ -1,0 +1,33 @@
+package storage
+
+{{- if eq .Storage "firebase-storage" }}
+import "firebase.google.com/go/v4/storage"
+
+func Client(client *storage.Client) *storage.Client {
+	return client
+}
+{{- else if eq .Storage "s3" }}
+import "github.com/aws/aws-sdk-go-v2/service/s3"
+
+func Client(client *s3.Client) *s3.Client {
+	return client
+}
+{{- else if eq .Storage "r2" }}
+import "github.com/aws/aws-sdk-go-v2/service/s3"
+
+func Client(client *s3.Client) *s3.Client {
+	return client
+}
+{{- else if eq .Storage "supabase-storage" }}
+type Config struct {
+	URL            string
+	ServiceRoleKey string
+}
+
+func NewConfig(url string, serviceRoleKey string) Config {
+	return Config{
+		URL:            url,
+		ServiceRoleKey: serviceRoleKey,
+	}
+}
+{{- end }}

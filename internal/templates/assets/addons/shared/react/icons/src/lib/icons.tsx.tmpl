@@ -1,0 +1,7 @@
+{{- if eq .Icons "lucide-react" }}
+export { Rocket as AppIcon } from "lucide-react";
+{{- else if eq .Icons "react-icons" }}
+export { FiZap as AppIcon } from "react-icons/fi";
+{{- else }}
+export const AppIcon = () => null;
+{{- end }}

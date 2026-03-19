@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 ASSET_DIR="$ROOT_DIR/internal/templates/assets/nextjs"
 mkdir -p "$ROOT_DIR/.tmp"
 WORK_DIR="$(mktemp -d "$ROOT_DIR/.tmp/templates-nextjs-XXXXXX")"
+APP_NAME="app"
 APP_DIR="$WORK_DIR/app"
 
 cleanup() {
@@ -13,21 +14,18 @@ cleanup() {
 
 trap cleanup EXIT
 
-pnpm dlx create-next-app@latest "$APP_DIR" \
-  --ts \
-  --biome \
-  --tailwind \
-  --app \
-  --src-dir \
-  --import-alias '@/*' \
-  --yes \
-  --disable-git \
-  --skip-install
-
 (
-  cd "$APP_DIR"
-  pnpm add zod
-  pnpm add -D vitest
+  cd "$WORK_DIR"
+  CI=1 pnpm dlx create-next-app@latest "$APP_NAME" \
+    --ts \
+    --biome \
+    --tailwind \
+    --app \
+    --src-dir \
+    --import-alias \
+    --yes \
+    --disable-git \
+    --skip-install
 )
 
 rm -rf "$ASSET_DIR"

@@ -1,0 +1,16 @@
+import { betterAuth } from "better-auth";
+import { prismaAdapter } from "better-auth/adapters/prisma";
+import { prisma } from "./prisma";
+
+export const auth = betterAuth({
+  database: prismaAdapter(prisma, {
+    provider: "{{ if or (eq .Database "postgres") (eq .Database "supabase") }}postgresql{{ else if eq .Database "mysql" }}mysql{{ else }}sqlite{{ end }}",
+  }),
+  secret: process.env.BETTER_AUTH_SECRET,
+  baseURL: process.env.BETTER_AUTH_URL,
+  emailAndPassword: {
+    enabled: true,
+  },
+});
+
+export type Session = typeof auth.$Infer.Session;

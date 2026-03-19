@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 )
 
@@ -13,6 +14,22 @@ func NewAddonRegistry(addons []Addon) (AddonRegistry, error) {
 	registered := make(map[AddonID]Addon, len(addons))
 
 	for _, addon := range addons {
+		if addon.Kind == "" {
+			addon.Kind = addon.Integration
+		}
+		if addon.Integration == "" {
+			addon.Integration = addon.Kind
+		}
+		if addon.Value == "" {
+			addon.Value = addon.IntegrationValue
+		}
+		if addon.IntegrationValue == "" {
+			addon.IntegrationValue = addon.Value
+		}
+		if addon.Target == "" {
+			addon.Target = SelectionTargetBackend
+		}
+
 		if addon.ID == "" {
 			return AddonRegistry{}, fmt.Errorf("addon id is required")
 		}
@@ -25,12 +42,16 @@ func NewAddonRegistry(addons []Addon) (AddonRegistry, error) {
 			return AddonRegistry{}, fmt.Errorf("addon %q is missing pack id", addon.ID)
 		}
 
-		if addon.Integration == "" {
-			return AddonRegistry{}, fmt.Errorf("addon %q is missing integration kind", addon.ID)
+		if addon.Kind == "" {
+			return AddonRegistry{}, fmt.Errorf("addon %q is missing selection kind", addon.ID)
 		}
 
-		if addon.IntegrationValue == "" {
-			return AddonRegistry{}, fmt.Errorf("addon %q is missing integration value", addon.ID)
+		if addon.Value == "" {
+			return AddonRegistry{}, fmt.Errorf("addon %q is missing selection value", addon.ID)
+		}
+
+		if addon.Target == "" {
+			return AddonRegistry{}, fmt.Errorf("addon %q is missing target", addon.ID)
 		}
 
 		registered[addon.ID] = addon
@@ -53,8 +74,13 @@ func (r AddonRegistry) Get(id AddonID) (Addon, bool) {
 	return addon, ok
 }
 
-func (r AddonRegistry) Lookup(kind IntegrationKind, value string, packID PackID) (Addon, bool) {
-	return r.Get(NewAddonID(kind, value, packID))
+func (r AddonRegistry) Lookup(kind SelectionKind, value string, packID PackID) (Addon, bool) {
+	matches := r.matching(Pack{ID: packID}, "", kind, value, nil)
+	if len(matches) == 0 {
+		return Addon{}, false
+	}
+
+	return matches[0], true
 }
 
 func (r AddonRegistry) ForPack(packID PackID) []Addon {
@@ -72,30 +98,110 @@ func (r AddonRegistry) ForPack(packID PackID) []Addon {
 	return addons
 }
 
-func (r AddonRegistry) Resolve(packID PackID, auth AuthOption, database DatabaseOption, storage StorageOption, email EmailOption) []Addon {
-	var result []Addon
+func (r AddonRegistry) VisibleValues(pack Pack, target SelectionTarget, kind SelectionKind, selections SelectionSet) []string {
+	values := make([]string, 0)
 
-	checks := []struct {
-		kind  IntegrationKind
-		value string
-	}{
-		{IntegrationAuth, string(auth)},
-		{IntegrationDatabase, string(database)},
-		{IntegrationStorage, string(storage)},
-		{IntegrationEmail, string(email)},
-	}
-
-	for _, check := range checks {
-		if check.value == "" {
+	for _, addon := range r.ForPack(pack.ID) {
+		if addon.Target != target || addon.Kind != kind {
+			continue
+		}
+		if !addon.matches(pack, selections) {
+			continue
+		}
+		if slices.Contains(values, addon.Value) {
 			continue
 		}
 
-		if addon, ok := r.Lookup(check.kind, check.value, packID); ok {
-			result = append(result, addon)
+		values = append(values, addon.Value)
+	}
+
+	sort.Strings(values)
+	return values
+}
+
+func (r AddonRegistry) SupportsKind(pack Pack, target SelectionTarget, kind SelectionKind, selections SelectionSet) bool {
+	return len(r.VisibleValues(pack, target, kind, selections)) > 0
+}
+
+func (r AddonRegistry) ResolveSelections(pack Pack, target SelectionTarget, selections SelectionSet) []Addon {
+	var result []Addon
+
+	for _, kind := range selections.Kinds() {
+		value := selections.Get(kind)
+		if value == "" {
+			continue
 		}
+
+		result = append(result, r.matching(pack, target, kind, value, selections)...)
 	}
 
 	return result
+}
+
+func (r AddonRegistry) Resolve(packID PackID, auth AuthOption, database DatabaseOption, storage StorageOption, email EmailOption) []Addon {
+	pack := Pack{ID: packID}
+	selections := NewSelectionSet()
+	selections.Set(SelectionKindAuth, string(auth))
+	selections.Set(SelectionKindDatabase, string(database))
+	selections.Set(SelectionKindStorage, string(storage))
+	selections.Set(SelectionKindEmail, string(email))
+
+	return r.ResolveSelections(pack, SelectionTargetBackend, selections)
+}
+
+func (r AddonRegistry) matching(pack Pack, target SelectionTarget, kind SelectionKind, value string, selections SelectionSet) []Addon {
+	matches := make([]Addon, 0)
+
+	for _, addon := range r.addons {
+		if addon.PackID != pack.ID {
+			continue
+		}
+		if target != "" && addon.Target != target {
+			continue
+		}
+		if addon.Kind != kind || addon.Value != value {
+			continue
+		}
+		if selections != nil && !addon.matches(pack, selections) {
+			continue
+		}
+
+		matches = append(matches, addon)
+	}
+
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].ID < matches[j].ID
+	})
+
+	return matches
+}
+
+func (a Addon) matches(pack Pack, selections SelectionSet) bool {
+	for _, trait := range a.When.RequiredPackTraits {
+		if !pack.HasTrait(trait) {
+			return false
+		}
+	}
+
+	for _, trait := range a.When.ForbiddenPackTraits {
+		if pack.HasTrait(trait) {
+			return false
+		}
+	}
+
+	for kind, values := range a.When.RequiredSelections {
+		if len(values) > 0 && !slices.Contains(values, selections.Get(kind)) {
+			return false
+		}
+	}
+
+	for kind, values := range a.When.ForbiddenSelections {
+		if slices.Contains(values, selections.Get(kind)) {
+			return false
+		}
+	}
+
+	return true
 }
 
 func (r AddonRegistry) All() []Addon {

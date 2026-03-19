@@ -1,0 +1,7 @@
+{{- if eq .Email "resend" }}
+import os
+
+import resend
+
+resend.api_key = os.getenv("RESEND_API_KEY")
+{{- end }}

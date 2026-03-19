@@ -1,0 +1,44 @@
+{{- if eq .Storage "s3" }}
+import os
+
+import boto3
+
+storage = boto3.client("s3", region_name=os.getenv("S3_REGION", "us-east-1"))
+{{- else if eq .Storage "r2" }}
+import os
+
+import boto3
+
+storage = boto3.client(
+    "s3",
+    region_name="auto",
+    endpoint_url=f"https://{os.getenv('R2_ACCOUNT_ID')}.r2.cloudflarestorage.com",
+)
+{{- else if eq .Storage "supabase-storage" }}
+import os
+
+from supabase import create_client
+
+storage = create_client(
+    os.getenv("SUPABASE_URL", ""),
+    os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
+)
+{{- else if eq .Storage "firebase-storage" }}
+import os
+
+import firebase_admin
+from firebase_admin import credentials, storage
+
+if not firebase_admin._apps:
+    firebase_admin.initialize_app(
+        credentials.Certificate(
+            {
+                "project_id": os.getenv("FIREBASE_PROJECT_ID"),
+                "client_email": os.getenv("FIREBASE_CLIENT_EMAIL"),
+                "private_key": os.getenv("FIREBASE_PRIVATE_KEY"),
+            }
+        )
+    )
+
+bucket = storage.bucket()
+{{- end }}

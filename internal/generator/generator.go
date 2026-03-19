@@ -38,9 +38,15 @@ type templateData struct {
 	ModulePath  string
 	Runtime     string
 	Database    string
+	ORM         string
+	Lint        string
+	Tests       string
+	Tailwind    string
 	Auth        string
 	Storage     string
 	Email       string
+	Icons       string
+	Components  string
 }
 
 func Generate(spec resolver.ProjectSpec, plan resolver.ResolvedPlan, registry catalog.Registry, addonRegistry catalog.AddonRegistry, options Options) (Result, error) {
@@ -318,16 +324,22 @@ func packTemplateData(spec resolver.ProjectSpec, pack catalog.Pack) templateData
 		ProjectSlug: projectSlug(spec.ProjectName),
 		ModulePath:  goModulePath(spec.ProjectName, effectivePackOutputDir(spec, nil, pack)),
 		Runtime:     string(pack.Runtime),
-		Database:    string(spec.Database),
-		Auth:        string(spec.Auth),
-		Storage:     string(spec.Storage),
-		Email:       string(spec.Email),
+		Database:    string(spec.DatabaseOption()),
+		ORM:         string(spec.OrmOption()),
+		Lint:        string(spec.LintOption()),
+		Tests:       string(spec.TestsOption()),
+		Tailwind:    string(spec.TailwindOption()),
+		Auth:        string(spec.AuthOption()),
+		Storage:     string(spec.StorageOption()),
+		Email:       string(spec.EmailOption()),
+		Icons:       string(spec.IconsOption()),
+		Components:  string(spec.ComponentsOption()),
 	}
 }
 
 func scaffoldAddons(targetDir string, spec resolver.ProjectSpec, packs []catalog.Pack, addonRegistry catalog.AddonRegistry) error {
-	for _, pack := range integrationPacks(spec, packs) {
-		addons := addonRegistry.Resolve(pack.ID, spec.Auth, spec.Database, spec.Storage, spec.Email)
+	for _, pack := range packs {
+		addons := addonsForPack(spec, packs, pack, addonRegistry)
 		data := packTemplateData(spec, pack)
 
 		for _, addon := range addons {
@@ -352,8 +364,8 @@ func scaffoldAddons(targetDir string, spec resolver.ProjectSpec, packs []catalog
 }
 
 func mergeAddonDependencies(targetDir string, spec resolver.ProjectSpec, packs []catalog.Pack, addonRegistry catalog.AddonRegistry) error {
-	for _, pack := range integrationPacks(spec, packs) {
-		addons := addonRegistry.Resolve(pack.ID, spec.Auth, spec.Database, spec.Storage, spec.Email)
+	for _, pack := range packs {
+		addons := addonsForPack(spec, packs, pack, addonRegistry)
 		if len(addons) == 0 {
 			continue
 		}
@@ -369,17 +381,45 @@ func mergeAddonDependencies(targetDir string, spec resolver.ProjectSpec, packs [
 			continue
 		}
 
-		manifestPath := filepath.Join(targetDir, filepath.FromSlash(effectivePackOutputDir(spec, packs, pack)), "package.json")
-		if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
-			continue
-		}
-
-		if err := mergePackageJSONAddons(manifestPath, addons); err != nil {
+		if err := mergePackManifestAddons(targetDir, spec, packs, pack, addons); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func mergePackManifestAddons(targetDir string, spec resolver.ProjectSpec, packs []catalog.Pack, pack catalog.Pack, addons []catalog.Addon) error {
+	baseDir := filepath.Join(targetDir, filepath.FromSlash(effectivePackOutputDir(spec, packs, pack)))
+
+	switch pack.Language {
+	case catalog.LanguageTypeScript:
+		manifestPath := filepath.Join(baseDir, "package.json")
+		if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
+			return nil
+		}
+		return mergePackageJSONAddons(manifestPath, addons)
+	case catalog.LanguagePython:
+		manifestPath := filepath.Join(baseDir, "pyproject.toml")
+		if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
+			return nil
+		}
+		return mergePyProjectAddons(manifestPath, addons)
+	case catalog.LanguageGo:
+		manifestPath := filepath.Join(baseDir, "go.mod")
+		if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
+			return nil
+		}
+		return mergeGoModAddons(manifestPath, addons)
+	case catalog.LanguagePHP:
+		manifestPath := filepath.Join(baseDir, "composer.json")
+		if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
+			return nil
+		}
+		return mergeComposerJSONAddons(manifestPath, addons)
+	default:
+		return nil
+	}
 }
 
 type packageJSONShape struct {
@@ -430,6 +470,173 @@ func mergePackageJSONAddons(path string, addons []catalog.Addon) error {
 	}
 
 	return os.WriteFile(path, append(out, '\n'), 0o644)
+}
+
+type composerJSONShape struct {
+	Name        string            `json:"name"`
+	Type        string            `json:"type,omitempty"`
+	Require     map[string]string `json:"require,omitempty"`
+	RequireDev  map[string]string `json:"require-dev,omitempty"`
+	Scripts     map[string]string `json:"scripts,omitempty"`
+	Autoload    map[string]any    `json:"autoload,omitempty"`
+	AutoloadDev map[string]any    `json:"autoload-dev,omitempty"`
+}
+
+func mergeComposerJSONAddons(path string, addons []catalog.Addon) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read manifest %q: %w", path, err)
+	}
+
+	var manifest composerJSONShape
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return fmt.Errorf("parse manifest %q: %w", path, err)
+	}
+
+	if manifest.Require == nil {
+		manifest.Require = make(map[string]string)
+	}
+	if manifest.RequireDev == nil {
+		manifest.RequireDev = make(map[string]string)
+	}
+
+	for _, addon := range addons {
+		for name, version := range addon.Dependencies {
+			manifest.Require[name] = version
+		}
+		for name, version := range addon.DevDependencies {
+			manifest.RequireDev[name] = version
+		}
+	}
+
+	out, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("serialize manifest %q: %w", path, err)
+	}
+
+	return os.WriteFile(path, append(out, '\n'), 0o644)
+}
+
+func mergePyProjectAddons(path string, addons []catalog.Addon) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read manifest %q: %w", path, err)
+	}
+
+	deps := make([]string, 0)
+	devDeps := make([]string, 0)
+	for _, addon := range addons {
+		for name, version := range addon.Dependencies {
+			deps = append(deps, pythonRequirement(name, version))
+		}
+		for name, version := range addon.DevDependencies {
+			devDeps = append(devDeps, pythonRequirement(name, version))
+		}
+	}
+
+	contents := string(raw)
+	if len(deps) > 0 {
+		contents, err = appendQuotedListEntries(contents, "dependencies = [", deps)
+		if err != nil {
+			return fmt.Errorf("merge project dependencies into %q: %w", path, err)
+		}
+	}
+	if len(devDeps) > 0 {
+		contents, err = appendQuotedListEntries(contents, "dev = [", devDeps)
+		if err != nil {
+			return fmt.Errorf("merge dev dependencies into %q: %w", path, err)
+		}
+	}
+
+	return os.WriteFile(path, []byte(contents), 0o644)
+}
+
+func pythonRequirement(name string, version string) string {
+	if version == "" {
+		return name
+	}
+	if strings.HasPrefix(version, ">") || strings.HasPrefix(version, "=") || strings.HasPrefix(version, "<") {
+		return name + version
+	}
+	return fmt.Sprintf("%s>=%s", name, version)
+}
+
+func appendQuotedListEntries(contents string, header string, entries []string) (string, error) {
+	start := strings.Index(contents, header)
+	if start == -1 {
+		return "", fmt.Errorf("list header %q not found", header)
+	}
+
+	listStart := start + len(header)
+	listEnd := strings.Index(contents[listStart:], "]")
+	if listEnd == -1 {
+		return "", fmt.Errorf("list terminator for %q not found", header)
+	}
+	listEnd += listStart
+
+	existing := contents[listStart:listEnd]
+	seen := make(map[string]struct{})
+	for _, line := range strings.Split(existing, "\n") {
+		trimmed := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(line), "\""), "\","))
+		if trimmed == "" {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+	}
+
+	builder := &strings.Builder{}
+	builder.WriteString(contents[:listEnd])
+	for _, entry := range entries {
+		if _, ok := seen[entry]; ok {
+			continue
+		}
+		builder.WriteString(fmt.Sprintf("  \"%s\",\n", entry))
+	}
+	builder.WriteString(contents[listEnd:])
+	return builder.String(), nil
+}
+
+func mergeGoModAddons(path string, addons []catalog.Addon) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read manifest %q: %w", path, err)
+	}
+
+	contents := string(raw)
+	seen := make(map[string]struct{})
+	for _, line := range strings.Split(contents, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] != "module" && fields[0] != "go" && fields[0] != "require" && fields[0] != ")" {
+			if strings.Contains(fields[0], ".") {
+				seen[fields[0]] = struct{}{}
+			}
+		}
+	}
+
+	requires := make([]string, 0)
+	for _, addon := range addons {
+		for name, version := range addon.Dependencies {
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			requires = append(requires, fmt.Sprintf("\t%s %s", name, version))
+		}
+	}
+	if len(requires) == 0 {
+		return nil
+	}
+
+	sort.Strings(requires)
+	builder := &strings.Builder{}
+	builder.WriteString(strings.TrimRight(contents, "\n"))
+	builder.WriteString("\n\nrequire (\n")
+	for _, line := range requires {
+		builder.WriteString(line)
+		builder.WriteString("\n")
+	}
+	builder.WriteString(")\n")
+
+	return os.WriteFile(path, []byte(builder.String()), 0o644)
 }
 
 func writePackOverlays(targetDir string, spec resolver.ProjectSpec, packs []catalog.Pack, addonRegistry catalog.AddonRegistry) error {
@@ -887,8 +1094,8 @@ func selectedSkillAssetPaths(spec resolver.ProjectSpec, packs []catalog.Pack, ad
 		appendPath(pack.SkillAssets)
 	}
 
-	for _, pack := range integrationPacks(spec, packs) {
-		for _, addon := range addonRegistry.Resolve(pack.ID, spec.Auth, spec.Database, spec.Storage, spec.Email) {
+	for _, pack := range packs {
+		for _, addon := range addonsForPack(spec, packs, pack, addonRegistry) {
 			appendPath(addon.SkillAssets)
 		}
 	}
@@ -973,7 +1180,7 @@ func renderPackEnvExample(pack catalog.Pack, spec resolver.ProjectSpec, addons [
 		builder.WriteString("\n")
 	}
 
-	if pack.ID == catalog.PackIDHonoWorkers && spec.Database == catalog.DatabaseD1 {
+	if pack.ID == catalog.PackIDHonoWorkers && spec.DatabaseOption() == catalog.DatabaseD1 {
 		builder.WriteString("\n# Cloudflare D1, KV, and R2 are bound in wrangler.jsonc rather than exported as environment variables.\n")
 		builder.WriteString("# Keep the generated binding stubs if you want Wrangler to auto-provision them, or replace them with fixed IDs and names from an existing account.\n")
 	}
@@ -1044,7 +1251,7 @@ func renderPackAgentsFile(pack catalog.Pack, spec resolver.ProjectSpec, addons [
 		builder.WriteString("- Use Wrangler bindings for D1, KV, and R2 instead of external REST APIs.\n")
 		builder.WriteString("- The generated wrangler.jsonc keeps shareable binding stubs so Wrangler can auto-provision and backfill IDs on first deploy.\n")
 		builder.WriteString("- Run `wrangler types` after Wrangler config changes so `worker-configuration.d.ts` stays aligned with your bindings.\n")
-		if spec.Database == catalog.DatabaseD1 {
+		if spec.DatabaseOption() == catalog.DatabaseD1 {
 			builder.WriteString("- The generated Workers config assumes D1 is the primary database binding.\n")
 		}
 	}
@@ -1222,28 +1429,8 @@ func renderMakefile(spec resolver.ProjectSpec, packs []catalog.Pack) string {
 func integrationEnvVars(spec resolver.ProjectSpec, packs []catalog.Pack, addonRegistry catalog.AddonRegistry) []catalog.EnvVar {
 	var variables []catalog.EnvVar
 
-	// Database env vars are still spec-level since the base templates handle
-	// database branching via template conditionals rather than addons.
-	switch spec.Database {
-	case catalog.DatabasePostgres:
-		variables = append(variables, catalog.EnvVar{Name: "DATABASE_URL", Example: "postgres://postgres:postgres@localhost:5432/app", Required: true, Description: "Connection string for the primary Postgres database."})
-	case catalog.DatabaseSQLite:
-		variables = append(variables, catalog.EnvVar{Name: "DATABASE_URL", Example: "sqlite:///./app.db", Required: true, Description: "Connection string for the local SQLite database."})
-	case catalog.DatabaseSupabase:
-		variables = append(variables,
-			catalog.EnvVar{Name: "DATABASE_URL", Example: "postgres://postgres:postgres@db.your-project.supabase.co:5432/postgres", Required: true, Description: "Connection string for the Supabase Postgres database used by the backend."},
-			catalog.EnvVar{Name: "SUPABASE_URL", Example: "https://your-project.supabase.co", Required: false, Description: "Optional Supabase project URL for client or auth integrations."},
-			catalog.EnvVar{Name: "SUPABASE_ANON_KEY", Example: "your-anon-key", Required: false, Description: "Optional Supabase anonymous client key for client or auth integrations."},
-		)
-	}
-
-	// All other integration env vars come from addons.
-	for _, pack := range integrationPacks(spec, packs) {
-		addons := addonRegistry.Resolve(pack.ID, spec.Auth, spec.Database, spec.Storage, spec.Email)
-		for _, addon := range addons {
-			if addon.Integration == catalog.IntegrationDatabase {
-				continue
-			}
+	for _, pack := range packs {
+		for _, addon := range addonsForPack(spec, packs, pack, addonRegistry) {
 			variables = append(variables, addon.EnvVars...)
 		}
 	}
@@ -1352,28 +1539,23 @@ func effectiveManagedFilePath(spec resolver.ProjectSpec, packs []catalog.Pack, p
 	return strings.TrimPrefix(path, prefix)
 }
 
-func integrationPacks(spec resolver.ProjectSpec, packs []catalog.Pack) []catalog.Pack {
-	if spec.Mode != catalog.ProjectModeFullStack || spec.BackendPackID == "" {
-		return packs
-	}
-
-	for _, pack := range packs {
-		if pack.ID == spec.BackendPackID {
-			return []catalog.Pack{pack}
-		}
-	}
-
-	return packs
-}
-
 func addonsForPack(spec resolver.ProjectSpec, packs []catalog.Pack, pack catalog.Pack, addonRegistry catalog.AddonRegistry) []catalog.Addon {
-	for _, integrationPack := range integrationPacks(spec, packs) {
-		if integrationPack.ID == pack.ID {
-			return addonRegistry.Resolve(pack.ID, spec.Auth, spec.Database, spec.Storage, spec.Email)
-		}
+	selections := spec.SelectionsOrLegacy()
+	addons := make([]catalog.Addon, 0)
+	targets := make([]catalog.SelectionTarget, 0, 2)
+
+	if spec.FrontendPackID == pack.ID {
+		targets = append(targets, catalog.SelectionTargetFrontend)
+	}
+	if spec.BackendPackID == pack.ID {
+		targets = append(targets, catalog.SelectionTargetBackend)
 	}
 
-	return nil
+	for _, target := range targets {
+		addons = append(addons, addonRegistry.ResolveSelections(pack, target, selections)...)
+	}
+
+	return addons
 }
 
 func writeFile(path string, contents string) error {

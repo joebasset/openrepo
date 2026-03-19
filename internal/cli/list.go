@@ -2,158 +2,156 @@ package cli
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/joebasset/openrepo/internal/catalog"
 )
 
-func renderAvailableOptions(registry catalog.Registry, addonRegistry catalog.AddonRegistry) string {
-	var sections []string
-
-	sections = append(sections, renderPacksSection(registry))
-	sections = append(sections, renderPackDetailsSection(registry))
-	sections = append(sections, renderOptionValuesSection())
-	sections = append(sections, renderAddonCoverageSection(registry, addonRegistry))
-
-	return strings.Join(sections, "\n\n")
-}
-
-func renderPacksSection(registry catalog.Registry) string {
-	frontend := packIDsForCategory(registry, catalog.PackCategoryFrontend)
-	backend := packIDsForCategory(registry, catalog.PackCategoryBackend)
-
-	lines := []string{
-		"Packs",
-		fmt.Sprintf("  frontend: %s", strings.Join(frontend, ", ")),
-		fmt.Sprintf("  backend:  %s", strings.Join(backend, ", ")),
+func renderAvailableOptions(registry catalog.Registry, addonRegistry catalog.AddonRegistry, options createOptions) string {
+	input, err := newCreateInput(options)
+	if err != nil {
+		return err.Error()
 	}
 
-	return strings.Join(lines, "\n")
+	if options.listFE {
+		return renderPackSection(registry, catalog.PackCategoryFrontend)
+	}
+	if options.listBE {
+		return renderPackSection(registry, catalog.PackCategoryBackend)
+	}
+	if options.listDB {
+		return renderSelectionSection(registry, addonRegistry, input, catalog.SelectionKindDatabase)
+	}
+	if options.listORMs {
+		return renderSelectionSection(registry, addonRegistry, input, catalog.SelectionKindORM)
+	}
+	if options.listLint {
+		return renderSelectionSection(registry, addonRegistry, input, catalog.SelectionKindLint)
+	}
+	if options.listTests {
+		return renderSelectionSection(registry, addonRegistry, input, catalog.SelectionKindTests)
+	}
+	if options.listTailwind {
+		return renderSelectionSection(registry, addonRegistry, input, catalog.SelectionKindTailwind)
+	}
+	if options.listAddons {
+		return renderAddonsSection(registry, addonRegistry, input)
+	}
+
+	sections := []string{
+		renderPackSection(registry, catalog.PackCategoryFrontend),
+		renderPackSection(registry, catalog.PackCategoryBackend),
+		renderSelectionSection(registry, addonRegistry, input, catalog.SelectionKindDatabase),
+		renderSelectionSection(registry, addonRegistry, input, catalog.SelectionKindORM),
+		renderSelectionSection(registry, addonRegistry, input, catalog.SelectionKindLint),
+		renderSelectionSection(registry, addonRegistry, input, catalog.SelectionKindTests),
+		renderSelectionSection(registry, addonRegistry, input, catalog.SelectionKindTailwind),
+		renderAddonsSection(registry, addonRegistry, input),
+	}
+
+	return strings.Join(compactSections(sections), "\n\n")
 }
 
-func renderPackDetailsSection(registry catalog.Registry) string {
-	lines := []string{"Pack details"}
+func compactSections(sections []string) []string {
+	compacted := make([]string, 0, len(sections))
+	for _, section := range sections {
+		if strings.TrimSpace(section) == "" {
+			continue
+		}
+		compacted = append(compacted, section)
+	}
+	return compacted
+}
 
+func renderPackSection(registry catalog.Registry, category catalog.PackCategory) string {
+	title := "Frontend Packs"
+	if category == catalog.PackCategoryBackend {
+		title = "Backend Packs"
+	}
+
+	lines := []string{title}
 	for _, pack := range registry.All() {
-		lines = append(lines, fmt.Sprintf("  %-12s %-28s %s", pack.ID, pack.DisplayName, packCategoryLabel(pack)))
-	}
-
-	return strings.Join(lines, "\n")
-}
-
-func renderOptionValuesSection() string {
-	lines := []string{
-		"Options",
-		fmt.Sprintf("  mode:            %s", strings.Join([]string{
-			string(catalog.ProjectModeFrontend),
-			string(catalog.ProjectModeBackend),
-			string(catalog.ProjectModeFullStack),
-		}, ", ")),
-		fmt.Sprintf("  package-manager: %s", strings.Join([]string{
-			string(catalog.PackageManagerNPM),
-			string(catalog.PackageManagerPNPM),
-			string(catalog.PackageManagerBun),
-			string(catalog.PackageManagerYarn),
-		}, ", ")),
-		fmt.Sprintf("  database:        %s", strings.Join([]string{
-			string(catalog.DatabasePostgres),
-			string(catalog.DatabaseSQLite),
-			string(catalog.DatabaseSupabase),
-			string(catalog.DatabaseD1),
-			"none",
-		}, ", ")),
-		fmt.Sprintf("  auth:            %s", strings.Join([]string{
-			string(catalog.AuthBetter),
-			string(catalog.AuthSupabase),
-			"none",
-		}, ", ")),
-		fmt.Sprintf("  storage:         %s", strings.Join([]string{
-			string(catalog.StorageR2),
-			string(catalog.StorageS3),
-			string(catalog.StorageSupabase),
-			"none",
-		}, ", ")),
-		fmt.Sprintf("  email:           %s", strings.Join([]string{
-			string(catalog.EmailResend),
-			"none",
-		}, ", ")),
-	}
-
-	return strings.Join(lines, "\n")
-}
-
-func renderAddonCoverageSection(registry catalog.Registry, addonRegistry catalog.AddonRegistry) string {
-	lines := []string{"Addon support"}
-
-	for _, pack := range registry.All() {
-		addons := addonRegistry.ForPack(pack.ID)
-		if len(addons) == 0 {
+		if !pack.SupportsCategory(category) {
 			continue
 		}
 
-		summaries := make([]string, 0, len(addonKindOrder()))
-		for _, kind := range addonKindOrder() {
-			values := addonValuesForKind(addons, kind)
-			if len(values) == 0 {
-				continue
-			}
-
-			summaries = append(summaries, fmt.Sprintf("%s=%s", kind, strings.Join(values, "|")))
+		lines = append(lines, fmt.Sprintf("  %-18s %s", pack.ID, pack.DisplayName))
+		if strings.TrimSpace(pack.Description) != "" {
+			lines = append(lines, fmt.Sprintf("  %-18s %s", "", pack.Description))
 		}
-
-		lines = append(lines, fmt.Sprintf("  %-12s %s", pack.ID, strings.Join(summaries, "  ")))
 	}
 
 	return strings.Join(lines, "\n")
 }
 
-func packCategoryLabel(pack catalog.Pack) string {
-	labels := make([]string, 0, 2)
-	if pack.SupportsCategory(catalog.PackCategoryFrontend) {
-		labels = append(labels, string(catalog.PackCategoryFrontend))
+func renderSelectionSection(registry catalog.Registry, addonRegistry catalog.AddonRegistry, input createInput, kind catalog.SelectionKind) string {
+	title := strings.Title(catalog.SelectionDefinitionFor(kind).Label)
+	lines := []string{title}
+
+	values := visibleSelectionValues(registry, addonRegistry, input, kind)
+	if len(values) == 0 && !hasPackContext(input) {
+		values = globalValuesForKind(addonRegistry, kind)
+		if len(values) == 0 {
+			return ""
+		}
+		lines = append(lines, "  (showing global values; pass --fe/--be for context-aware output)")
 	}
-	if pack.SupportsCategory(catalog.PackCategoryBackend) {
-		labels = append(labels, string(catalog.PackCategoryBackend))
+	if len(values) == 0 {
+		return ""
 	}
 
-	return strings.Join(labels, ", ")
+	for _, value := range values {
+		lines = append(lines, fmt.Sprintf("  %-18s %s", value, catalog.SelectionValueLabel(kind, value)))
+	}
+
+	return strings.Join(lines, "\n")
 }
 
-func addonKindOrder() []catalog.IntegrationKind {
-	return []catalog.IntegrationKind{
-		catalog.IntegrationDatabase,
-		catalog.IntegrationAuth,
-		catalog.IntegrationStorage,
-		catalog.IntegrationEmail,
+func renderAddonsSection(registry catalog.Registry, addonRegistry catalog.AddonRegistry, input createInput) string {
+	lines := []string{"Optional Addons"}
+	found := false
+
+	for _, kind := range optionalAddonKinds() {
+		values := visibleSelectionValues(registry, addonRegistry, input, kind)
+		if len(values) == 0 && !hasPackContext(input) {
+			values = globalValuesForKind(addonRegistry, kind)
+		}
+		if len(values) == 0 {
+			continue
+		}
+
+		found = true
+		lines = append(lines, fmt.Sprintf("  [%s]", catalog.SelectionDefinitionFor(kind).ReviewLabel))
+		for _, value := range values {
+			lines = append(lines, fmt.Sprintf("  %-18s %s", addonSelectionID(kind, value), catalog.SelectionValueLabel(kind, value)))
+		}
 	}
+
+	if !found {
+		return ""
+	}
+
+	lines = append(lines, "  skills are derived automatically from the selected packs, foundations, and addons")
+	return strings.Join(lines, "\n")
 }
 
-func addonValuesForKind(addons []catalog.Addon, kind catalog.IntegrationKind) []string {
+func hasPackContext(input createInput) bool {
+	return input.Frontend != "" || input.Backend != ""
+}
+
+func globalValuesForKind(addonRegistry catalog.AddonRegistry, kind catalog.SelectionKind) []string {
 	values := make([]string, 0)
+	seen := make(map[string]struct{})
 
-	for _, addon := range addons {
-		if addon.Integration != kind {
+	for _, addon := range addonRegistry.All() {
+		if addon.Kind != kind {
 			continue
 		}
-		if slices.Contains(values, addon.IntegrationValue) {
+		if _, ok := seen[addon.Value]; ok {
 			continue
 		}
-
-		values = append(values, addon.IntegrationValue)
-	}
-
-	slices.Sort(values)
-	return values
-}
-
-func packIDsForCategory(registry catalog.Registry, category catalog.PackCategory) []string {
-	values := make([]string, 0)
-
-	for _, pack := range registry.All() {
-		if pack.SupportsCategory(category) {
-			values = append(values, string(pack.ID))
-		}
+		seen[addon.Value] = struct{}{}
+		values = append(values, addon.Value)
 	}
 
 	return values

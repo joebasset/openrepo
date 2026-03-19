@@ -1,0 +1,45 @@
+package database
+
+{{- if eq .Database "postgres" }}
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+func Open(connectionString string) (*pgxpool.Pool, error) {
+	return pgxpool.New(context.Background(), connectionString)
+}
+{{- else if eq .Database "mysql" }}
+import (
+	"database/sql"
+
+	_ "github.com/go-sql-driver/mysql"
+)
+
+func Open(connectionString string) (*sql.DB, error) {
+	return sql.Open("mysql", connectionString)
+}
+{{- else if eq .Database "sqlite" }}
+import (
+	"database/sql"
+
+	_ "modernc.org/sqlite"
+)
+
+func Open(connectionString string) (*sql.DB, error) {
+	return sql.Open("sqlite", connectionString)
+}
+{{- else if eq .Database "mongodb" }}
+import "go.mongodb.org/mongo-driver/v2/mongo"
+
+func Open(_ string) (*mongo.Client, error) {
+	return nil, nil
+}
+{{- else if eq .Database "firebase" }}
+import "firebase.google.com/go/v4"
+
+func Open() (*firebase.App, error) {
+	return nil, nil
+}
+{{- end }}

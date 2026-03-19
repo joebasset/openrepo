@@ -3,11 +3,16 @@ package catalog
 func defaultPacks() []Pack {
 	return []Pack{
 		nextJSPack(),
+		reactPack(),
+		vuePack(),
 		expoPack(),
+		ionicReactPack(),
+		tanStackStartPack(),
 		honoNodePack(),
 		honoWorkersPack(),
 		fastAPIPack(),
 		ginPack(),
+		laravelPack(),
 	}
 }
 
@@ -62,6 +67,8 @@ func nextJSPack() Pack {
 			SupportsSupabaseAuth:  true,
 			SupportsStorage:       true,
 			SupportsEmail:         true,
+			ReactBased:            true,
+			SupportsTailwind:      true,
 			SupportsBackendMode:   true,
 		},
 		External: &ExternalScaffold{
@@ -114,6 +121,8 @@ func expoPack() Pack {
 			ProvidesServerRuntime: false,
 			UsesTypeScript:        true,
 			SupportsSupabaseAuth:  true,
+			ReactBased:            true,
+			Mobile:                true,
 		},
 		External: &ExternalScaffold{
 			Tool:                      "create-expo-app",
@@ -240,6 +249,7 @@ func honoWorkersPack() Pack {
 			SupportsSupabaseAuth:  true,
 			SupportsStorage:       true,
 			SupportsEmail:         true,
+			WorkersRuntime:        true,
 		},
 		External: &ExternalScaffold{
 			Tool:                      "create-hono",

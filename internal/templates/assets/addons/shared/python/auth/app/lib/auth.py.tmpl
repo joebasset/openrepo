@@ -1,0 +1,25 @@
+{{- if eq .Auth "supabase-auth" }}
+import os
+
+from supabase import create_client
+
+auth = create_client(os.getenv("SUPABASE_URL", ""), os.getenv("SUPABASE_ANON_KEY", ""))
+{{- else if eq .Auth "firebase-auth" }}
+import os
+
+import firebase_admin
+from firebase_admin import auth as firebase_auth, credentials
+
+if not firebase_admin._apps:
+    firebase_admin.initialize_app(
+        credentials.Certificate(
+            {
+                "project_id": os.getenv("FIREBASE_PROJECT_ID"),
+                "client_email": os.getenv("FIREBASE_CLIENT_EMAIL"),
+                "private_key": os.getenv("FIREBASE_PRIVATE_KEY"),
+            }
+        )
+    )
+
+auth = firebase_auth
+{{- end }}

@@ -30,10 +30,11 @@ func resendSkillAssets() *SkillAssetBundle {
 }
 
 func defaultAddons() []Addon {
-	return []Addon{
+	addons := []Addon{
 		// Hono Node addons
 		honoNodeSupabaseDatabaseAddon(),
 		honoNodeBetterAuthAddon(),
+		honoNodeBetterAuthPrismaAddon(),
 		honoNodeSupabaseAuthAddon(),
 		honoNodeS3Addon(),
 		honoNodeR2Addon(),
@@ -68,6 +69,9 @@ func defaultAddons() []Addon {
 		ginSupabaseStorageAddon(),
 		ginResendAddon(),
 	}
+
+	addons = append(addons, expandedCurrentPackAddons()...)
+	return addons
 }
 
 // ---------------------------------------------------------------------------
@@ -82,22 +86,31 @@ func honoNodeSupabaseDatabaseAddon() Addon {
 		IntegrationValue: string(DatabaseSupabase),
 		PackID:           packID,
 		DisplayName:      "Supabase Database for Hono Node",
+		EnvVars:          databaseEnvVars(DatabaseSupabase),
 		SkillAssets:      supabaseSkillAssets(),
 	}
 }
 
 func honoNodeBetterAuthAddon() Addon {
 	packID := PackIDHonoNode
-	root := "assets/addons/hono-node/auth/better-auth"
+	root := "assets/addons/shared/node/auth/better-auth"
 	out := "apps/api"
 	return Addon{
 		ID:               NewAddonID(IntegrationAuth, string(AuthBetter), packID),
 		Integration:      IntegrationAuth,
 		IntegrationValue: string(AuthBetter),
-		PackID:           packID,
-		DisplayName:      "Better Auth for Hono Node",
+		When: AddonWhen{
+			RequiredSelections: map[SelectionKind][]string{
+				SelectionKindORM: {string(ORMDrizzle)},
+			},
+			ForbiddenSelections: map[SelectionKind][]string{
+				SelectionKindDatabase: {string(DatabaseMongoDB), string(DatabaseFirebase)},
+			},
+		},
+		PackID:      packID,
+		DisplayName: "Better Auth for Hono Node",
 		Files: []ManagedFile{
-			{Path: out + "/src/lib/auth.ts", Role: FileRoleLocalTemplate, Description: "Better Auth server configuration with Drizzle adapter.", AssetPath: root + "/src/lib/auth.ts.tmpl"},
+			{Path: out + "/src/lib/auth.ts", Role: FileRoleLocalTemplate, Description: "Better Auth server configuration with Drizzle adapter.", AssetPath: root + "/drizzle/src/lib/auth.ts.tmpl"},
 			{Path: out + "/src/middleware/auth.ts", Role: FileRoleLocalTemplate, Description: "Hono middleware that validates Better Auth sessions.", AssetPath: root + "/src/middleware/auth.ts.tmpl"},
 			{Path: out + "/src/routes/auth.ts", Role: FileRoleLocalTemplate, Description: "Hono route handler that delegates to Better Auth.", AssetPath: root + "/src/routes/auth.ts.tmpl"},
 			{Path: out + "/src/db/schema/auth.ts", Role: FileRoleLocalTemplate, Description: "Drizzle schema tables for Better Auth (user, session, account, verification).", AssetPath: root + "/src/db/schema/auth.ts.tmpl"},
@@ -117,9 +130,49 @@ func honoNodeBetterAuthAddon() Addon {
 	}
 }
 
+func honoNodeBetterAuthPrismaAddon() Addon {
+	packID := PackIDHonoNode
+	root := "assets/addons/shared/node/auth/better-auth"
+	out := "apps/api"
+	return Addon{
+		ID:               AddonID("auth:better-auth:hono-node:prisma"),
+		Kind:             SelectionKindAuth,
+		Value:            string(AuthBetter),
+		Target:           SelectionTargetBackend,
+		Integration:      IntegrationAuth,
+		IntegrationValue: string(AuthBetter),
+		When: AddonWhen{
+			RequiredSelections: map[SelectionKind][]string{
+				SelectionKindORM: {string(ORMPrisma)},
+			},
+			ForbiddenSelections: map[SelectionKind][]string{
+				SelectionKindDatabase: {string(DatabaseMongoDB), string(DatabaseFirebase)},
+			},
+		},
+		PackID:      packID,
+		DisplayName: "Better Auth for Hono Node (Prisma)",
+		Files: []ManagedFile{
+			{Path: out + "/src/lib/auth.ts", Role: FileRoleLocalTemplate, Description: "Better Auth server configuration with Prisma adapter.", AssetPath: root + "/prisma/src/lib/auth.ts.tmpl"},
+			{Path: out + "/src/middleware/auth.ts", Role: FileRoleLocalTemplate, Description: "Hono middleware that validates Better Auth sessions.", AssetPath: root + "/src/middleware/auth.ts.tmpl"},
+			{Path: out + "/src/routes/auth.ts", Role: FileRoleLocalTemplate, Description: "Hono route handler that delegates to Better Auth.", AssetPath: root + "/src/routes/auth.ts.tmpl"},
+		},
+		Dependencies: map[string]string{
+			"better-auth": "^1.2.0",
+		},
+		EnvVars: []EnvVar{
+			{Name: "BETTER_AUTH_SECRET", Example: "replace-me", Required: true, Description: "Application secret used by Better Auth."},
+			{Name: "BETTER_AUTH_URL", Example: "http://localhost:3001", Required: true, Description: "Base URL for Better Auth callbacks."},
+		},
+		AgentRules: []AgentRule{
+			{Title: "Auth Sessions", Instruction: "Use the auth middleware on protected routes and access the session from the Hono context."},
+		},
+		SkillAssets: betterAuthSkillAssets(),
+	}
+}
+
 func honoNodeSupabaseAuthAddon() Addon {
 	packID := PackIDHonoNode
-	root := "assets/addons/hono-node/auth/supabase-auth"
+	root := "assets/addons/shared/node/auth/supabase-auth/server"
 	out := "apps/api"
 	return Addon{
 		ID:               NewAddonID(IntegrationAuth, string(AuthSupabase), packID),
@@ -147,104 +200,29 @@ func honoNodeSupabaseAuthAddon() Addon {
 }
 
 func honoNodeS3Addon() Addon {
-	packID := PackIDHonoNode
-	root := "assets/addons/hono-node/storage/s3"
-	out := "apps/api"
-	return Addon{
-		ID:               NewAddonID(IntegrationStorage, string(StorageS3), packID),
-		Integration:      IntegrationStorage,
-		IntegrationValue: string(StorageS3),
-		PackID:           packID,
-		DisplayName:      "S3 Storage for Hono Node",
-		Files: []ManagedFile{
-			{Path: out + "/src/lib/storage.ts", Role: FileRoleLocalTemplate, Description: "AWS S3 client for file uploads and downloads.", AssetPath: root + "/src/lib/storage.ts.tmpl"},
-		},
-		Dependencies: map[string]string{
-			"@aws-sdk/client-s3": "^3.750.0",
-		},
-		EnvVars: []EnvVar{
-			{Name: "S3_BUCKET", Example: "app-assets", Required: true, Description: "Amazon S3 bucket name."},
-			{Name: "S3_REGION", Example: "us-east-1", Required: true, Description: "Amazon S3 region."},
-			{Name: "S3_ACCESS_KEY_ID", Example: "your-access-key-id", Required: true, Description: "Amazon S3 access key id."},
-			{Name: "S3_SECRET_ACCESS_KEY", Example: "your-secret-access-key", Required: true, Description: "Amazon S3 secret access key."},
-		},
-		AgentRules: []AgentRule{
-			{Title: "S3 Storage", Instruction: "Use the storage client from src/lib/storage.ts for file operations instead of direct SDK calls."},
-		},
-	}
+	addon := nodeStorageAddon(PackIDHonoNode, SelectionTargetBackend, "apps/api", "S3 Storage for Hono Node", StorageS3, s3EnvVars())
+	addon.AgentRules = []AgentRule{{Title: "S3 Storage", Instruction: "Use the storage client from src/lib/storage.ts for file operations instead of direct SDK calls."}}
+	return addon
 }
 
 func honoNodeR2Addon() Addon {
-	packID := PackIDHonoNode
-	root := "assets/addons/hono-node/storage/r2"
-	out := "apps/api"
-	return Addon{
-		ID:               NewAddonID(IntegrationStorage, string(StorageR2), packID),
-		Integration:      IntegrationStorage,
-		IntegrationValue: string(StorageR2),
-		PackID:           packID,
-		DisplayName:      "R2 Storage for Hono Node",
-		Files: []ManagedFile{
-			{Path: out + "/src/lib/storage.ts", Role: FileRoleLocalTemplate, Description: "Cloudflare R2 client via S3-compatible API.", AssetPath: root + "/src/lib/storage.ts.tmpl"},
-		},
-		Dependencies: map[string]string{
-			"@aws-sdk/client-s3": "^3.750.0",
-		},
-		EnvVars: r2EnvVars(),
-		AgentRules: []AgentRule{
-			{Title: "R2 Storage", Instruction: "Use the storage client from src/lib/storage.ts for file operations instead of direct SDK calls."},
-		},
-	}
+	addon := nodeStorageAddon(PackIDHonoNode, SelectionTargetBackend, "apps/api", "R2 Storage for Hono Node", StorageR2, r2EnvVars())
+	addon.AgentRules = []AgentRule{{Title: "R2 Storage", Instruction: "Use the storage client from src/lib/storage.ts for file operations instead of direct SDK calls."}}
+	return addon
 }
 
 func honoNodeSupabaseStorageAddon() Addon {
-	packID := PackIDHonoNode
-	root := "assets/addons/hono-node/storage/supabase-storage"
-	out := "apps/api"
-	return Addon{
-		ID:               NewAddonID(IntegrationStorage, string(StorageSupabase), packID),
-		Integration:      IntegrationStorage,
-		IntegrationValue: string(StorageSupabase),
-		PackID:           packID,
-		DisplayName:      "Supabase Storage for Hono Node",
-		Files: []ManagedFile{
-			{Path: out + "/src/lib/storage.ts", Role: FileRoleLocalTemplate, Description: "Supabase Storage client.", AssetPath: root + "/src/lib/storage.ts.tmpl"},
-		},
-		Dependencies: map[string]string{
-			"@supabase/supabase-js": "^2.49.0",
-		},
-		EnvVars: supabaseStorageEnvVars(),
-		AgentRules: []AgentRule{
-			{Title: "Supabase Storage", Instruction: "Use the storage client from src/lib/storage.ts for file operations."},
-		},
-		SkillAssets: supabaseSkillAssets(),
-	}
+	addon := nodeStorageAddon(PackIDHonoNode, SelectionTargetBackend, "apps/api", "Supabase Storage for Hono Node", StorageSupabase, supabaseStorageEnvVars())
+	addon.AgentRules = []AgentRule{{Title: "Supabase Storage", Instruction: "Use the storage client from src/lib/storage.ts for file operations."}}
+	addon.SkillAssets = supabaseSkillAssets()
+	return addon
 }
 
 func honoNodeResendAddon() Addon {
-	packID := PackIDHonoNode
-	root := "assets/addons/hono-node/email/resend"
-	out := "apps/api"
-	return Addon{
-		ID:               NewAddonID(IntegrationEmail, string(EmailResend), packID),
-		Integration:      IntegrationEmail,
-		IntegrationValue: string(EmailResend),
-		PackID:           packID,
-		DisplayName:      "Resend Email for Hono Node",
-		Files: []ManagedFile{
-			{Path: out + "/src/lib/email.ts", Role: FileRoleLocalTemplate, Description: "Resend email client.", AssetPath: root + "/src/lib/email.ts.tmpl"},
-		},
-		Dependencies: map[string]string{
-			"resend": "^4.1.0",
-		},
-		EnvVars: []EnvVar{
-			{Name: "RESEND_API_KEY", Example: "re_xxx", Required: true, Description: "API key used to send email through Resend."},
-		},
-		AgentRules: []AgentRule{
-			{Title: "Email", Instruction: "Use the email client from src/lib/email.ts for sending emails instead of direct Resend SDK calls."},
-		},
-		SkillAssets: resendSkillAssets(),
-	}
+	addon := nodeEmailAddon(PackIDHonoNode, SelectionTargetBackend, "apps/api", "Resend Email for Hono Node", EmailResend)
+	addon.AgentRules = []AgentRule{{Title: "Email", Instruction: "Use the email client from src/lib/email.ts for sending emails instead of direct Resend SDK calls."}}
+	addon.SkillAssets = resendSkillAssets()
+	return addon
 }
 
 // ---------------------------------------------------------------------------
@@ -252,29 +230,10 @@ func honoNodeResendAddon() Addon {
 // ---------------------------------------------------------------------------
 
 func honoWorkersResendAddon() Addon {
-	packID := PackIDHonoWorkers
-	root := "assets/addons/hono-workers/email/resend"
-	out := "apps/api"
-	return Addon{
-		ID:               NewAddonID(IntegrationEmail, string(EmailResend), packID),
-		Integration:      IntegrationEmail,
-		IntegrationValue: string(EmailResend),
-		PackID:           packID,
-		DisplayName:      "Resend Email for Hono Workers",
-		Files: []ManagedFile{
-			{Path: out + "/src/lib/email.ts", Role: FileRoleLocalTemplate, Description: "Resend email client for Workers.", AssetPath: root + "/src/lib/email.ts.tmpl"},
-		},
-		Dependencies: map[string]string{
-			"resend": "^4.1.0",
-		},
-		EnvVars: []EnvVar{
-			{Name: "RESEND_API_KEY", Example: "re_xxx", Required: true, Description: "API key used to send email through Resend."},
-		},
-		AgentRules: []AgentRule{
-			{Title: "Email", Instruction: "Use the email client from src/lib/email.ts for sending emails."},
-		},
-		SkillAssets: resendSkillAssets(),
-	}
+	addon := nodeEmailAddon(PackIDHonoWorkers, SelectionTargetBackend, "apps/api", "Resend Email for Hono Workers", EmailResend)
+	addon.AgentRules = []AgentRule{{Title: "Email", Instruction: "Use the email client from src/lib/email.ts for sending emails."}}
+	addon.SkillAssets = resendSkillAssets()
+	return addon
 }
 
 // ---------------------------------------------------------------------------
@@ -289,20 +248,30 @@ func nextjsSupabaseDatabaseAddon() Addon {
 		IntegrationValue: string(DatabaseSupabase),
 		PackID:           packID,
 		DisplayName:      "Supabase Database for Next.js",
+		EnvVars:          databaseEnvVars(DatabaseSupabase),
 		SkillAssets:      supabaseSkillAssets(),
 	}
 }
 
 func nextjsBetterAuthAddon() Addon {
 	packID := PackIDNextJS
-	root := "assets/addons/nextjs/auth/better-auth"
+	root := "assets/addons/shared/react/auth/better-auth"
 	out := "apps/web"
 	return Addon{
 		ID:               NewAddonID(IntegrationAuth, string(AuthBetter), packID),
 		Integration:      IntegrationAuth,
 		IntegrationValue: string(AuthBetter),
-		PackID:           packID,
-		DisplayName:      "Better Auth Client for Next.js",
+		Target:           SelectionTargetFrontend,
+		When: AddonWhen{
+			RequiredSelections: map[SelectionKind][]string{
+				SelectionKindORM: {string(ORMDrizzle), string(ORMPrisma)},
+			},
+			ForbiddenSelections: map[SelectionKind][]string{
+				SelectionKindDatabase: {string(DatabaseMongoDB), string(DatabaseFirebase)},
+			},
+		},
+		PackID:      packID,
+		DisplayName: "Better Auth Client for Next.js",
 		Files: []ManagedFile{
 			{Path: out + "/src/lib/auth-client.ts", Role: FileRoleLocalTemplate, Description: "Better Auth client instance for React components.", AssetPath: root + "/src/lib/auth-client.ts.tmpl"},
 		},
@@ -318,12 +287,13 @@ func nextjsBetterAuthAddon() Addon {
 
 func nextjsSupabaseAuthAddon() Addon {
 	packID := PackIDNextJS
-	root := "assets/addons/nextjs/auth/supabase-auth"
+	root := "assets/addons/shared/react/auth/supabase-auth"
 	out := "apps/web"
 	return Addon{
 		ID:               NewAddonID(IntegrationAuth, string(AuthSupabase), packID),
 		Integration:      IntegrationAuth,
 		IntegrationValue: string(AuthSupabase),
+		Target:           SelectionTargetFrontend,
 		PackID:           packID,
 		DisplayName:      "Supabase Auth for Next.js",
 		Files: []ManagedFile{
@@ -345,104 +315,29 @@ func nextjsSupabaseAuthAddon() Addon {
 }
 
 func nextjsS3Addon() Addon {
-	packID := PackIDNextJS
-	root := "assets/addons/nextjs/storage/s3"
-	out := "apps/web"
-	return Addon{
-		ID:               NewAddonID(IntegrationStorage, string(StorageS3), packID),
-		Integration:      IntegrationStorage,
-		IntegrationValue: string(StorageS3),
-		PackID:           packID,
-		DisplayName:      "S3 Storage for Next.js",
-		Files: []ManagedFile{
-			{Path: out + "/src/lib/storage.ts", Role: FileRoleLocalTemplate, Description: "AWS S3 client for file uploads and downloads.", AssetPath: root + "/src/lib/storage.ts.tmpl"},
-		},
-		Dependencies: map[string]string{
-			"@aws-sdk/client-s3": "^3.750.0",
-		},
-		EnvVars: []EnvVar{
-			{Name: "S3_BUCKET", Example: "app-assets", Required: true, Description: "Amazon S3 bucket name."},
-			{Name: "S3_REGION", Example: "us-east-1", Required: true, Description: "Amazon S3 region."},
-			{Name: "S3_ACCESS_KEY_ID", Example: "your-access-key-id", Required: true, Description: "Amazon S3 access key id."},
-			{Name: "S3_SECRET_ACCESS_KEY", Example: "your-secret-access-key", Required: true, Description: "Amazon S3 secret access key."},
-		},
-		AgentRules: []AgentRule{
-			{Title: "S3 Storage", Instruction: "Use the storage client from src/lib/storage.ts for file operations in API routes."},
-		},
-	}
+	addon := nodeStorageAddon(PackIDNextJS, SelectionTargetBackend, "apps/web", "S3 Storage for Next.js", StorageS3, s3EnvVars())
+	addon.AgentRules = []AgentRule{{Title: "S3 Storage", Instruction: "Use the storage client from src/lib/storage.ts for file operations in API routes."}}
+	return addon
 }
 
 func nextjsR2Addon() Addon {
-	packID := PackIDNextJS
-	root := "assets/addons/nextjs/storage/r2"
-	out := "apps/web"
-	return Addon{
-		ID:               NewAddonID(IntegrationStorage, string(StorageR2), packID),
-		Integration:      IntegrationStorage,
-		IntegrationValue: string(StorageR2),
-		PackID:           packID,
-		DisplayName:      "R2 Storage for Next.js",
-		Files: []ManagedFile{
-			{Path: out + "/src/lib/storage.ts", Role: FileRoleLocalTemplate, Description: "Cloudflare R2 client via S3-compatible API.", AssetPath: root + "/src/lib/storage.ts.tmpl"},
-		},
-		Dependencies: map[string]string{
-			"@aws-sdk/client-s3": "^3.750.0",
-		},
-		EnvVars: r2EnvVars(),
-		AgentRules: []AgentRule{
-			{Title: "R2 Storage", Instruction: "Use the storage client from src/lib/storage.ts for file operations in API routes."},
-		},
-	}
+	addon := nodeStorageAddon(PackIDNextJS, SelectionTargetBackend, "apps/web", "R2 Storage for Next.js", StorageR2, r2EnvVars())
+	addon.AgentRules = []AgentRule{{Title: "R2 Storage", Instruction: "Use the storage client from src/lib/storage.ts for file operations in API routes."}}
+	return addon
 }
 
 func nextjsSupabaseStorageAddon() Addon {
-	packID := PackIDNextJS
-	root := "assets/addons/nextjs/storage/supabase-storage"
-	out := "apps/web"
-	return Addon{
-		ID:               NewAddonID(IntegrationStorage, string(StorageSupabase), packID),
-		Integration:      IntegrationStorage,
-		IntegrationValue: string(StorageSupabase),
-		PackID:           packID,
-		DisplayName:      "Supabase Storage for Next.js",
-		Files: []ManagedFile{
-			{Path: out + "/src/lib/storage.ts", Role: FileRoleLocalTemplate, Description: "Supabase Storage client.", AssetPath: root + "/src/lib/storage.ts.tmpl"},
-		},
-		Dependencies: map[string]string{
-			"@supabase/supabase-js": "^2.49.0",
-		},
-		EnvVars: supabaseStorageEnvVars(),
-		AgentRules: []AgentRule{
-			{Title: "Supabase Storage", Instruction: "Use the storage client from src/lib/storage.ts for file operations in API routes."},
-		},
-		SkillAssets: supabaseSkillAssets(),
-	}
+	addon := nodeStorageAddon(PackIDNextJS, SelectionTargetBackend, "apps/web", "Supabase Storage for Next.js", StorageSupabase, supabaseStorageEnvVars())
+	addon.AgentRules = []AgentRule{{Title: "Supabase Storage", Instruction: "Use the storage client from src/lib/storage.ts for file operations in API routes."}}
+	addon.SkillAssets = supabaseSkillAssets()
+	return addon
 }
 
 func nextjsResendAddon() Addon {
-	packID := PackIDNextJS
-	root := "assets/addons/nextjs/email/resend"
-	out := "apps/web"
-	return Addon{
-		ID:               NewAddonID(IntegrationEmail, string(EmailResend), packID),
-		Integration:      IntegrationEmail,
-		IntegrationValue: string(EmailResend),
-		PackID:           packID,
-		DisplayName:      "Resend Email for Next.js",
-		Files: []ManagedFile{
-			{Path: out + "/src/lib/email.ts", Role: FileRoleLocalTemplate, Description: "Resend email client for API routes.", AssetPath: root + "/src/lib/email.ts.tmpl"},
-		},
-		Dependencies: map[string]string{
-			"resend": "^4.1.0",
-		},
-		EnvVars: []EnvVar{
-			{Name: "RESEND_API_KEY", Example: "re_xxx", Required: true, Description: "API key used to send email through Resend."},
-		},
-		AgentRules: []AgentRule{
-			{Title: "Email", Instruction: "Use the email client from src/lib/email.ts for sending emails in API routes."},
-		},
-		SkillAssets: resendSkillAssets(),
-	}
+	addon := nodeEmailAddon(PackIDNextJS, SelectionTargetBackend, "apps/web", "Resend Email for Next.js", EmailResend)
+	addon.AgentRules = []AgentRule{{Title: "Email", Instruction: "Use the email client from src/lib/email.ts for sending emails in API routes."}}
+	addon.SkillAssets = resendSkillAssets()
+	return addon
 }
 
 // ---------------------------------------------------------------------------
@@ -457,122 +352,42 @@ func fastAPISupabaseDatabaseAddon() Addon {
 		IntegrationValue: string(DatabaseSupabase),
 		PackID:           packID,
 		DisplayName:      "Supabase Database for FastAPI",
+		EnvVars:          databaseEnvVars(DatabaseSupabase),
 		SkillAssets:      supabaseSkillAssets(),
 	}
 }
 
 func fastAPISupabaseAuthAddon() Addon {
-	packID := PackIDFastAPI
-	root := "assets/addons/fastapi/auth/supabase-auth"
-	out := "apps/api"
-	return Addon{
-		ID:               NewAddonID(IntegrationAuth, string(AuthSupabase), packID),
-		Integration:      IntegrationAuth,
-		IntegrationValue: string(AuthSupabase),
-		PackID:           packID,
-		DisplayName:      "Supabase Auth for FastAPI",
-		Files: []ManagedFile{
-			{Path: out + "/app/lib/supabase.py", Role: FileRoleLocalTemplate, Description: "Supabase client and auth dependency for FastAPI.", AssetPath: root + "/app/lib/supabase.py.tmpl"},
-		},
-		EnvVars: []EnvVar{
-			{Name: "SUPABASE_URL", Example: "https://your-project.supabase.co", Required: true, Description: "Supabase project URL used for auth flows."},
-			{Name: "SUPABASE_ANON_KEY", Example: "your-anon-key", Required: true, Description: "Supabase anonymous client key used for auth flows."},
-			{Name: "SUPABASE_SERVICE_ROLE_KEY", Example: "your-service-role-key", Required: false, Description: "Supabase service role key for server-side operations."},
-		},
-		AgentRules: []AgentRule{
-			{Title: "Supabase Auth", Instruction: "Use the get_current_user dependency from app/lib/supabase.py on protected endpoints."},
-		},
-		SkillAssets: supabaseSkillAssets(),
-	}
+	addon := pythonAuthAddon(PackIDFastAPI, "apps/api", "Supabase Auth for FastAPI", AuthSupabase, supabaseAuthEnvVars())
+	addon.AgentRules = []AgentRule{{Title: "Supabase Auth", Instruction: "Use the auth helper from app/lib/auth.py on protected endpoints."}}
+	addon.SkillAssets = supabaseSkillAssets()
+	return addon
 }
 
 func fastAPIS3Addon() Addon {
-	packID := PackIDFastAPI
-	root := "assets/addons/fastapi/storage/s3"
-	out := "apps/api"
-	return Addon{
-		ID:               NewAddonID(IntegrationStorage, string(StorageS3), packID),
-		Integration:      IntegrationStorage,
-		IntegrationValue: string(StorageS3),
-		PackID:           packID,
-		DisplayName:      "S3 Storage for FastAPI",
-		Files: []ManagedFile{
-			{Path: out + "/app/lib/storage.py", Role: FileRoleLocalTemplate, Description: "S3 client for file uploads and downloads.", AssetPath: root + "/app/lib/storage.py.tmpl"},
-		},
-		EnvVars: []EnvVar{
-			{Name: "S3_BUCKET", Example: "app-assets", Required: true, Description: "Amazon S3 bucket name."},
-			{Name: "S3_REGION", Example: "us-east-1", Required: true, Description: "Amazon S3 region."},
-			{Name: "S3_ACCESS_KEY_ID", Example: "your-access-key-id", Required: true, Description: "Amazon S3 access key id."},
-			{Name: "S3_SECRET_ACCESS_KEY", Example: "your-secret-access-key", Required: true, Description: "Amazon S3 secret access key."},
-		},
-		AgentRules: []AgentRule{
-			{Title: "S3 Storage", Instruction: "Use the storage client from app/lib/storage.py for file operations."},
-		},
-	}
+	addon := pythonStorageAddon(PackIDFastAPI, "apps/api", "S3 Storage for FastAPI", StorageS3, s3EnvVars())
+	addon.AgentRules = []AgentRule{{Title: "S3 Storage", Instruction: "Use the storage client from app/lib/storage.py for file operations."}}
+	return addon
 }
 
 func fastAPIR2Addon() Addon {
-	packID := PackIDFastAPI
-	root := "assets/addons/fastapi/storage/r2"
-	out := "apps/api"
-	return Addon{
-		ID:               NewAddonID(IntegrationStorage, string(StorageR2), packID),
-		Integration:      IntegrationStorage,
-		IntegrationValue: string(StorageR2),
-		PackID:           packID,
-		DisplayName:      "R2 Storage for FastAPI",
-		Files: []ManagedFile{
-			{Path: out + "/app/lib/storage.py", Role: FileRoleLocalTemplate, Description: "Cloudflare R2 client via S3-compatible API.", AssetPath: root + "/app/lib/storage.py.tmpl"},
-		},
-		EnvVars: r2EnvVars(),
-		AgentRules: []AgentRule{
-			{Title: "R2 Storage", Instruction: "Use the storage client from app/lib/storage.py for file operations."},
-		},
-	}
+	addon := pythonStorageAddon(PackIDFastAPI, "apps/api", "R2 Storage for FastAPI", StorageR2, r2EnvVars())
+	addon.AgentRules = []AgentRule{{Title: "R2 Storage", Instruction: "Use the storage client from app/lib/storage.py for file operations."}}
+	return addon
 }
 
 func fastAPISupabaseStorageAddon() Addon {
-	packID := PackIDFastAPI
-	root := "assets/addons/fastapi/storage/supabase-storage"
-	out := "apps/api"
-	return Addon{
-		ID:               NewAddonID(IntegrationStorage, string(StorageSupabase), packID),
-		Integration:      IntegrationStorage,
-		IntegrationValue: string(StorageSupabase),
-		PackID:           packID,
-		DisplayName:      "Supabase Storage for FastAPI",
-		Files: []ManagedFile{
-			{Path: out + "/app/lib/storage.py", Role: FileRoleLocalTemplate, Description: "Supabase Storage client.", AssetPath: root + "/app/lib/storage.py.tmpl"},
-		},
-		EnvVars: supabaseStorageEnvVars(),
-		AgentRules: []AgentRule{
-			{Title: "Supabase Storage", Instruction: "Use the storage client from app/lib/storage.py for file operations."},
-		},
-		SkillAssets: supabaseSkillAssets(),
-	}
+	addon := pythonStorageAddon(PackIDFastAPI, "apps/api", "Supabase Storage for FastAPI", StorageSupabase, supabaseStorageEnvVars())
+	addon.AgentRules = []AgentRule{{Title: "Supabase Storage", Instruction: "Use the storage client from app/lib/storage.py for file operations."}}
+	addon.SkillAssets = supabaseSkillAssets()
+	return addon
 }
 
 func fastAPIResendAddon() Addon {
-	packID := PackIDFastAPI
-	root := "assets/addons/fastapi/email/resend"
-	out := "apps/api"
-	return Addon{
-		ID:               NewAddonID(IntegrationEmail, string(EmailResend), packID),
-		Integration:      IntegrationEmail,
-		IntegrationValue: string(EmailResend),
-		PackID:           packID,
-		DisplayName:      "Resend Email for FastAPI",
-		Files: []ManagedFile{
-			{Path: out + "/app/lib/email.py", Role: FileRoleLocalTemplate, Description: "Resend email client.", AssetPath: root + "/app/lib/email.py.tmpl"},
-		},
-		EnvVars: []EnvVar{
-			{Name: "RESEND_API_KEY", Example: "re_xxx", Required: true, Description: "API key used to send email through Resend."},
-		},
-		AgentRules: []AgentRule{
-			{Title: "Email", Instruction: "Use the email client from app/lib/email.py for sending emails."},
-		},
-		SkillAssets: resendSkillAssets(),
-	}
+	addon := pythonEmailAddon(PackIDFastAPI, "apps/api", "Resend Email for FastAPI", EmailResend)
+	addon.AgentRules = []AgentRule{{Title: "Email", Instruction: "Use the email client from app/lib/email.py for sending emails."}}
+	addon.SkillAssets = resendSkillAssets()
+	return addon
 }
 
 // ---------------------------------------------------------------------------
@@ -587,119 +402,40 @@ func ginSupabaseDatabaseAddon() Addon {
 		IntegrationValue: string(DatabaseSupabase),
 		PackID:           packID,
 		DisplayName:      "Supabase Database for Gin",
+		EnvVars:          databaseEnvVars(DatabaseSupabase),
 		SkillAssets:      supabaseSkillAssets(),
 	}
 }
 
 func ginSupabaseAuthAddon() Addon {
-	packID := PackIDGin
-	root := "assets/addons/gin/auth/supabase-auth"
-	out := "apps/api"
-	return Addon{
-		ID:               NewAddonID(IntegrationAuth, string(AuthSupabase), packID),
-		Integration:      IntegrationAuth,
-		IntegrationValue: string(AuthSupabase),
-		PackID:           packID,
-		DisplayName:      "Supabase Auth for Gin",
-		Files: []ManagedFile{
-			{Path: out + "/internal/auth/supabase.go", Role: FileRoleLocalTemplate, Description: "Supabase JWT validation middleware for Gin.", AssetPath: root + "/internal/auth/supabase.go.tmpl"},
-		},
-		EnvVars: []EnvVar{
-			{Name: "SUPABASE_URL", Example: "https://your-project.supabase.co", Required: true, Description: "Supabase project URL used for auth flows."},
-			{Name: "SUPABASE_ANON_KEY", Example: "your-anon-key", Required: true, Description: "Supabase anonymous client key used for auth flows."},
-		},
-		AgentRules: []AgentRule{
-			{Title: "Supabase Auth", Instruction: "Use the RequireAuth middleware from internal/auth/supabase.go on protected route groups."},
-		},
-		SkillAssets: supabaseSkillAssets(),
-	}
+	addon := goAuthAddon(PackIDGin, "apps/api", "Supabase Auth for Gin", AuthSupabase, supabaseAuthEnvVars())
+	addon.AgentRules = []AgentRule{{Title: "Supabase Auth", Instruction: "Use the auth helper from internal/auth/auth.go on protected route groups."}}
+	addon.SkillAssets = supabaseSkillAssets()
+	return addon
 }
 
 func ginS3Addon() Addon {
-	packID := PackIDGin
-	root := "assets/addons/gin/storage/s3"
-	out := "apps/api"
-	return Addon{
-		ID:               NewAddonID(IntegrationStorage, string(StorageS3), packID),
-		Integration:      IntegrationStorage,
-		IntegrationValue: string(StorageS3),
-		PackID:           packID,
-		DisplayName:      "S3 Storage for Gin",
-		Files: []ManagedFile{
-			{Path: out + "/internal/storage/s3.go", Role: FileRoleLocalTemplate, Description: "S3 client for file uploads and downloads.", AssetPath: root + "/internal/storage/s3.go.tmpl"},
-		},
-		EnvVars: []EnvVar{
-			{Name: "S3_BUCKET", Example: "app-assets", Required: true, Description: "Amazon S3 bucket name."},
-			{Name: "S3_REGION", Example: "us-east-1", Required: true, Description: "Amazon S3 region."},
-			{Name: "S3_ACCESS_KEY_ID", Example: "your-access-key-id", Required: true, Description: "Amazon S3 access key id."},
-			{Name: "S3_SECRET_ACCESS_KEY", Example: "your-secret-access-key", Required: true, Description: "Amazon S3 secret access key."},
-		},
-		AgentRules: []AgentRule{
-			{Title: "S3 Storage", Instruction: "Use the storage client from internal/storage/s3.go for file operations."},
-		},
-	}
+	addon := goStorageAddon(PackIDGin, "apps/api", "S3 Storage for Gin", StorageS3, s3EnvVars())
+	addon.AgentRules = []AgentRule{{Title: "S3 Storage", Instruction: "Use the storage client from internal/storage/storage.go for file operations."}}
+	return addon
 }
 
 func ginR2Addon() Addon {
-	packID := PackIDGin
-	root := "assets/addons/gin/storage/r2"
-	out := "apps/api"
-	return Addon{
-		ID:               NewAddonID(IntegrationStorage, string(StorageR2), packID),
-		Integration:      IntegrationStorage,
-		IntegrationValue: string(StorageR2),
-		PackID:           packID,
-		DisplayName:      "R2 Storage for Gin",
-		Files: []ManagedFile{
-			{Path: out + "/internal/storage/r2.go", Role: FileRoleLocalTemplate, Description: "Cloudflare R2 client via S3-compatible API.", AssetPath: root + "/internal/storage/r2.go.tmpl"},
-		},
-		EnvVars: r2EnvVars(),
-		AgentRules: []AgentRule{
-			{Title: "R2 Storage", Instruction: "Use the storage client from internal/storage/r2.go for file operations."},
-		},
-	}
+	addon := goStorageAddon(PackIDGin, "apps/api", "R2 Storage for Gin", StorageR2, r2EnvVars())
+	addon.AgentRules = []AgentRule{{Title: "R2 Storage", Instruction: "Use the storage client from internal/storage/storage.go for file operations."}}
+	return addon
 }
 
 func ginSupabaseStorageAddon() Addon {
-	packID := PackIDGin
-	root := "assets/addons/gin/storage/supabase-storage"
-	out := "apps/api"
-	return Addon{
-		ID:               NewAddonID(IntegrationStorage, string(StorageSupabase), packID),
-		Integration:      IntegrationStorage,
-		IntegrationValue: string(StorageSupabase),
-		PackID:           packID,
-		DisplayName:      "Supabase Storage for Gin",
-		Files: []ManagedFile{
-			{Path: out + "/internal/storage/supabase.go", Role: FileRoleLocalTemplate, Description: "Supabase Storage client.", AssetPath: root + "/internal/storage/supabase.go.tmpl"},
-		},
-		EnvVars: supabaseStorageEnvVars(),
-		AgentRules: []AgentRule{
-			{Title: "Supabase Storage", Instruction: "Use the storage client from internal/storage/supabase.go for file operations."},
-		},
-		SkillAssets: supabaseSkillAssets(),
-	}
+	addon := goStorageAddon(PackIDGin, "apps/api", "Supabase Storage for Gin", StorageSupabase, supabaseStorageEnvVars())
+	addon.AgentRules = []AgentRule{{Title: "Supabase Storage", Instruction: "Use the storage client from internal/storage/storage.go for file operations."}}
+	addon.SkillAssets = supabaseSkillAssets()
+	return addon
 }
 
 func ginResendAddon() Addon {
-	packID := PackIDGin
-	root := "assets/addons/gin/email/resend"
-	out := "apps/api"
-	return Addon{
-		ID:               NewAddonID(IntegrationEmail, string(EmailResend), packID),
-		Integration:      IntegrationEmail,
-		IntegrationValue: string(EmailResend),
-		PackID:           packID,
-		DisplayName:      "Resend Email for Gin",
-		Files: []ManagedFile{
-			{Path: out + "/internal/email/resend.go", Role: FileRoleLocalTemplate, Description: "Resend email client.", AssetPath: root + "/internal/email/resend.go.tmpl"},
-		},
-		EnvVars: []EnvVar{
-			{Name: "RESEND_API_KEY", Example: "re_xxx", Required: true, Description: "API key used to send email through Resend."},
-		},
-		AgentRules: []AgentRule{
-			{Title: "Email", Instruction: "Use the email client from internal/email/resend.go for sending emails."},
-		},
-		SkillAssets: resendSkillAssets(),
-	}
+	addon := goEmailAddon(PackIDGin, "apps/api", "Resend Email for Gin", EmailResend)
+	addon.AgentRules = []AgentRule{{Title: "Email", Instruction: "Use the email client from internal/email/email.go for sending emails."}}
+	addon.SkillAssets = resendSkillAssets()
+	return addon
 }

@@ -15,13 +15,7 @@ trap cleanup EXIT
 
 (
   cd "$WORK_DIR"
-  printf 'n\n' | pnpm create hono@latest app --template cloudflare-workers --pm pnpm
-)
-
-(
-  cd "$APP_DIR"
-  pnpm add drizzle-orm zod
-  pnpm add -D @biomejs/biome @types/node drizzle-kit typescript vitest wrangler@latest
+  printf 'n\n' | CI=1 pnpm create hono@latest app --template cloudflare-workers --pm pnpm
 )
 
 rm -rf "$ASSET_DIR"

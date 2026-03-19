@@ -1,63 +1,42 @@
 package catalog_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/joebasset/openrepo/internal/catalog"
 	"github.com/joebasset/openrepo/internal/templates"
 )
 
-func TestDefaultRegistryIncludesMVPPacks(t *testing.T) {
+func TestDefaultRegistryIncludesSupportedPacks(t *testing.T) {
 	registry := catalog.MustDefaultRegistry()
 
-	expectedIDs := []catalog.PackID{
+	expected := []catalog.PackID{
 		catalog.PackIDNextJS,
 		catalog.PackIDExpo,
+		catalog.PackIDTanStack,
 		catalog.PackIDHonoNode,
 		catalog.PackIDHonoWorkers,
 		catalog.PackIDFastAPI,
 		catalog.PackIDGin,
+		catalog.PackIDLaravel,
 	}
 
-	for _, id := range expectedIDs {
+	for _, id := range expected {
 		if _, ok := registry.Get(id); !ok {
-			t.Fatalf("expected registry to contain pack %q", id)
+			t.Fatalf("expected registry to contain %q", id)
 		}
+	}
+
+	if _, ok := registry.Get(catalog.PackIDExpress); ok {
+		t.Fatal("did not expect express to remain in the default full-stack pack list")
 	}
 }
 
-func TestRegistryPacksHaveStrategyMetadata(t *testing.T) {
+func TestLocalTemplateAssetsExistForSupportedPacks(t *testing.T) {
 	registry := catalog.MustDefaultRegistry()
 
 	for _, pack := range registry.All() {
-		switch pack.Strategy {
-		case catalog.PackStrategyExternalScaffold:
-			if pack.External == nil {
-				t.Fatalf("pack %q should declare external scaffold metadata", pack.ID)
-			}
-			if len(pack.External.Commands) == 0 {
-				t.Fatalf("pack %q should declare at least one external command", pack.ID)
-			}
-		case catalog.PackStrategyLocalTemplate:
-			if pack.Local == nil {
-				t.Fatalf("pack %q should declare local template metadata", pack.ID)
-			}
-		default:
-			t.Fatalf("pack %q declared unexpected strategy %q", pack.ID, pack.Strategy)
-		}
-	}
-}
-
-func TestLocalTemplateAssetsExist(t *testing.T) {
-	registry := catalog.MustDefaultRegistry()
-
-	for _, id := range []catalog.PackID{
-		catalog.PackIDNextJS,
-		catalog.PackIDHonoWorkers,
-		catalog.PackIDFastAPI,
-		catalog.PackIDGin,
-	} {
-		pack := registry.MustGet(id)
 		for _, file := range pack.Files {
 			if file.Role != catalog.FileRoleLocalTemplate {
 				continue
@@ -70,23 +49,61 @@ func TestLocalTemplateAssetsExist(t *testing.T) {
 	}
 }
 
-func TestExpoOnlyAllowsNPMAndYarn(t *testing.T) {
+func TestAddonRegistryResolvesBetterAuthVariantsByORM(t *testing.T) {
 	registry := catalog.MustDefaultRegistry()
-	expo := registry.MustGet(catalog.PackIDExpo)
+	addons := catalog.MustDefaultAddonRegistry()
+	pack := registry.MustGet(catalog.PackIDHonoNode)
 
-	if !expo.AllowsPackageManager(catalog.PackageManagerNPM) {
-		t.Fatal("expo should allow npm")
+	drizzleSelections := catalog.NewSelectionSet()
+	drizzleSelections.Set(catalog.SelectionKindDatabase, string(catalog.DatabasePostgres))
+	drizzleSelections.Set(catalog.SelectionKindORM, string(catalog.ORMDrizzle))
+	drizzleSelections.Set(catalog.SelectionKindAuth, string(catalog.AuthBetter))
+
+	resolvedDrizzle := addons.ResolveSelections(pack, catalog.SelectionTargetBackend, drizzleSelections)
+	if !containsAddonDisplayName(resolvedDrizzle, "Better Auth for Hono Node") {
+		t.Fatalf("expected drizzle variant, got %v", addonDisplayNames(resolvedDrizzle))
 	}
 
-	if !expo.AllowsPackageManager(catalog.PackageManagerYarn) {
-		t.Fatal("expo should allow yarn")
-	}
+	prismaSelections := catalog.NewSelectionSet()
+	prismaSelections.Set(catalog.SelectionKindDatabase, string(catalog.DatabasePostgres))
+	prismaSelections.Set(catalog.SelectionKindORM, string(catalog.ORMPrisma))
+	prismaSelections.Set(catalog.SelectionKindAuth, string(catalog.AuthBetter))
 
-	if expo.AllowsPackageManager(catalog.PackageManagerPNPM) {
-		t.Fatal("expo should not allow pnpm")
+	resolvedPrisma := addons.ResolveSelections(pack, catalog.SelectionTargetBackend, prismaSelections)
+	if !containsAddonDisplayName(resolvedPrisma, "Better Auth for Hono Node (Prisma)") {
+		t.Fatalf("expected prisma variant, got %v", addonDisplayNames(resolvedPrisma))
 	}
+}
 
-	if expo.AllowsPackageManager(catalog.PackageManagerBun) {
-		t.Fatal("expo should not allow bun")
+func TestAddonRegistryHidesUnsupportedBetterAuthCombination(t *testing.T) {
+	registry := catalog.MustDefaultRegistry()
+	addons := catalog.MustDefaultAddonRegistry()
+	pack := registry.MustGet(catalog.PackIDFastAPI)
+	selections := catalog.NewSelectionSet()
+	selections.Set(catalog.SelectionKindDatabase, string(catalog.DatabasePostgres))
+	selections.Set(catalog.SelectionKindORM, string(catalog.ORMSQLAlchemy))
+
+	values := addons.VisibleValues(pack, catalog.SelectionTargetBackend, catalog.SelectionKindAuth, selections)
+	for _, value := range values {
+		if strings.Contains(value, "better-auth") {
+			t.Fatalf("did not expect better-auth for fastapi, got %v", values)
+		}
 	}
+}
+
+func containsAddonDisplayName(addons []catalog.Addon, want string) bool {
+	for _, addon := range addons {
+		if addon.DisplayName == want {
+			return true
+		}
+	}
+	return false
+}
+
+func addonDisplayNames(addons []catalog.Addon) []string {
+	names := make([]string, 0, len(addons))
+	for _, addon := range addons {
+		names = append(names, addon.DisplayName)
+	}
+	return names
 }

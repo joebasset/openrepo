@@ -1,0 +1,33 @@
+{{- if eq .Auth "better-auth" }}
+import { betterAuth } from "better-auth";
+
+export const auth = betterAuth({
+  baseURL: process.env.BETTER_AUTH_URL,
+  secret: process.env.BETTER_AUTH_SECRET,
+  emailAndPassword: {
+    enabled: true,
+  },
+});
+{{- else if eq .Auth "supabase-auth" }}
+import { createClient } from "@supabase/supabase-js";
+
+export const auth = createClient(
+  process.env.SUPABASE_URL ?? "",
+  process.env.SUPABASE_ANON_KEY ?? "",
+);
+{{- else if eq .Auth "firebase-auth" }}
+import { cert, getApps, initializeApp } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
+
+const app =
+  getApps()[0] ??
+  initializeApp({
+    credential: cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+    }),
+  });
+
+export const auth = getAuth(app);
+{{- end }}

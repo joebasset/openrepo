@@ -3,7 +3,6 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/charmbracelet/huh"
@@ -18,837 +17,321 @@ type commandFlagState struct {
 	recommendedSkillsSet bool
 }
 
-type reviewAction string
-
-const (
-	noneSelectionValue                         = "none"
-	reviewActionCreate            reviewAction = "create"
-	reviewActionMode              reviewAction = "mode"
-	reviewActionFrontend          reviewAction = "frontend"
-	reviewActionBackend           reviewAction = "backend"
-	reviewActionPackageManager    reviewAction = "package-manager"
-	reviewActionAuth              reviewAction = "auth"
-	reviewActionDatabase          reviewAction = "database"
-	reviewActionStorage           reviewAction = "storage"
-	reviewActionEmail             reviewAction = "email"
-	reviewActionGitInit           reviewAction = "git-init"
-	reviewActionInstall           reviewAction = "install"
-	reviewActionRecommendedSkills reviewAction = "recommended-skills"
-)
-
 type createInput struct {
 	ProjectName       string
-	Mode              string
 	Frontend          string
 	Backend           string
 	PackageManager    string
 	Database          string
-	Auth              string
-	Storage           string
-	Email             string
+	ORM               string
+	Lint              string
+	Tests             string
+	Tailwind          string
+	AddOns            []string
 	GitInit           bool
 	Install           bool
 	RecommendedSkills bool
 }
 
-func newCreateInput(options createOptions) createInput {
+type optionValue struct {
+	Value       string
+	Label       string
+	Description string
+}
+
+type packGroup string
+
+type promptStep int
+
+const (
+	packGroupWeb        packGroup = "web"
+	packGroupMobile     packGroup = "mobile"
+	packGroupTypeScript packGroup = "typescript"
+	packGroupPython     packGroup = "python"
+	packGroupGo         packGroup = "go"
+	packGroupPHP        packGroup = "php"
+	backValue           string    = "__back__"
+
+	promptStepFrontendGroup promptStep = iota
+	promptStepFrontendPack
+	promptStepBackendGroup
+	promptStepBackendPack
+	promptStepPackageManagerChoice
+	promptStepDatabaseChoice
+	promptStepORMChoice
+	promptStepLintChoice
+	promptStepRecommendedSkillsChoice
+	promptStepShowAddonsChoice
+	promptStepOptionalAddonsChoice
+	promptStepGitInitChoice
+	promptStepInstallChoice
+	promptStepReviewChoice
+)
+
+func newCreateInput(options createOptions) (createInput, error) {
+	addOns := normalizeAddonIDs(options.addAddons)
+	for _, addonID := range addOns {
+		if _, _, err := parseAddonSelection(addonID); err != nil {
+			return createInput{}, err
+		}
+	}
+
 	return createInput{
 		ProjectName:       strings.TrimSpace(options.projectName),
-		Mode:              normalizeValue(options.mode),
-		Frontend:          normalizeValue(options.frontend),
-		Backend:           normalizeValue(options.backend),
-		PackageManager:    normalizeValue(options.packageManager),
-		Database:          normalizeValue(options.database),
-		Auth:              normalizeValue(options.auth),
-		Storage:           normalizeValue(options.storage),
-		Email:             normalizeValue(options.email),
+		Frontend:          strings.TrimSpace(options.fe),
+		Backend:           strings.TrimSpace(options.be),
+		PackageManager:    strings.TrimSpace(options.packageManager),
+		Database:          strings.TrimSpace(options.db),
+		ORM:               strings.TrimSpace(options.orm),
+		Lint:              strings.TrimSpace(options.lint),
+		Tests:             strings.TrimSpace(options.tests),
+		Tailwind:          strings.TrimSpace(options.tailwind),
+		AddOns:            addOns,
 		GitInit:           options.gitInit,
 		Install:           options.install,
 		RecommendedSkills: options.recommendedSkills,
-	}
+	}, nil
 }
 
-func promptForMissingValues(cmd *cobra.Command, registry catalog.Registry, input *createInput, flagState commandFlagState) error {
-	if err := promptSelectionSteps(cmd, registry, input, flagState); err != nil {
-		return err
-	}
-
-	reviewFlagState := commandFlagState{
-		gitInitSet:           true,
-		installSet:           true,
-		recommendedSkillsSet: true,
-	}
-
-	for {
-		action, err := promptReviewStep(cmd, registry, *input)
-		if err != nil {
-			return err
-		}
-
-		if action == reviewActionCreate {
-			return nil
-		}
-
-		if action == reviewActionGitInit {
-			if err := promptGitInit(cmd, input); err != nil {
-				return err
-			}
-			continue
-		}
-
-		if action == reviewActionInstall {
-			if err := promptInstall(cmd, input); err != nil {
-				return err
-			}
-			continue
-		}
-
-		if action == reviewActionRecommendedSkills {
-			if err := promptRecommendedSkills(cmd, registry, input); err != nil {
-				return err
-			}
-			continue
-		}
-
-		resetInputForReview(input, action)
-
-		if err := promptSelectionSteps(cmd, registry, input, reviewFlagState); err != nil {
-			return err
-		}
-	}
-}
-
-func frontendOptions(registry catalog.Registry) []huh.Option[string] {
-	return packOptions(registry, catalog.PackCategoryFrontend, catalog.PackIDNextJS, nil)
-}
-
-func backendOptions(registry catalog.Registry) []huh.Option[string] {
-	return packOptions(registry, catalog.PackCategoryBackend, catalog.PackIDHonoNode, func(pack catalog.Pack) string {
-		if pack.ID == catalog.PackIDHonoWorkers {
-			return " (Wrangler envs: dev, staging, production + D1/KV/R2)"
-		}
-		return ""
-	})
-}
-
-func packOptions(registry catalog.Registry, category catalog.PackCategory, recommendedID catalog.PackID, labelSuffix func(catalog.Pack) string) []huh.Option[string] {
-	options := make([]huh.Option[string], 0)
-	var recommended *huh.Option[string]
-
-	for _, pack := range registry.All() {
-		if !pack.SupportsCategory(category) {
-			continue
-		}
-
-		label := pack.DisplayName
-		if labelSuffix != nil {
-			label += labelSuffix(pack)
-		}
-
-		option := huh.NewOption(label, string(pack.ID))
-		if pack.ID == recommendedID {
-			recommended = &option
-			continue
-		}
-
-		options = append(options, option)
-	}
-
-	if recommended != nil {
-		options = append([]huh.Option[string]{*recommended}, options...)
-	}
-
-	return options
-}
-
-func packageManagerOptions(registry catalog.Registry, input createInput) []huh.Option[string] {
-	allowed := allowedPackageManagers(registry, input)
-	options := make([]huh.Option[string], 0, len(allowed))
-	recommended := recommendedPackageManager(registry, input, allowed)
-
-	if recommended != catalog.PackageManagerNone {
-		options = append(options, huh.NewOption(string(recommended)+" (recommended)", string(recommended)))
-	}
-
-	for _, manager := range preferredPackageManagerOrder() {
-		if !slices.Contains(allowed, manager) || manager == recommended {
-			continue
-		}
-
-		options = append(options, huh.NewOption(string(manager), string(manager)))
-	}
-
-	return options
-}
-
-func authPromptOptions(registry catalog.Registry, input createInput) []huh.Option[string] {
-	if input.Mode == string(catalog.ProjectModeFrontend) {
-		return []huh.Option[string]{huh.NewOption("None", noneSelectionValue)}
-	}
-
-	packs := selectedPacks(registry, input)
-	recommended := recommendedAuthOption(packs)
-	options := make([]huh.Option[string], 0, 3)
-
-	if recommended == catalog.AuthBetter {
-		options = append(options, huh.NewOption("Better Auth (recommended)", string(catalog.AuthBetter)))
-	}
-	if recommended == catalog.AuthSupabase {
-		options = append(options, huh.NewOption("Supabase Auth (recommended)", string(catalog.AuthSupabase)))
-	}
-
-	if hasCapability(packs, func(pack catalog.Pack) bool { return pack.Capabilities.SupportsBetterAuth }) && recommended != catalog.AuthBetter {
-		options = append(options, huh.NewOption("Better Auth", string(catalog.AuthBetter)))
-	}
-	if hasCapability(packs, func(pack catalog.Pack) bool { return pack.Capabilities.SupportsSupabaseAuth }) && recommended != catalog.AuthSupabase {
-		options = append(options, huh.NewOption("Supabase Auth", string(catalog.AuthSupabase)))
-	}
-
-	if recommended == catalog.AuthNone || len(options) == 0 {
-		options = append([]huh.Option[string]{huh.NewOption("None", noneSelectionValue)}, options...)
-	} else {
-		options = append(options, huh.NewOption("None", noneSelectionValue))
-	}
-
-	return options
-}
-
-func databasePromptOptions(registry catalog.Registry, input createInput) []huh.Option[string] {
-	if input.Mode == string(catalog.ProjectModeFrontend) {
-		return []huh.Option[string]{huh.NewOption("None", noneSelectionValue)}
-	}
-
-	packs := selectedPacks(registry, input)
-	if usesCloudflareWorkers(input) {
-		return []huh.Option[string]{
-			huh.NewOption("Cloudflare D1 (required for Workers; KV + R2 are configured too)", string(catalog.DatabaseD1)),
-		}
-	}
-	if !hasCapability(packs, func(pack catalog.Pack) bool { return pack.Capabilities.SupportsDatabase }) {
-		return []huh.Option[string]{huh.NewOption("None", noneSelectionValue)}
-	}
-
-	options := []huh.Option[string]{
-		huh.NewOption("Postgres (recommended)", string(catalog.DatabasePostgres)),
-		huh.NewOption("SQLite", string(catalog.DatabaseSQLite)),
-		huh.NewOption("Supabase", string(catalog.DatabaseSupabase)),
-	}
-
-	return append(options, huh.NewOption("None", noneSelectionValue))
-}
-
-func storagePromptOptions(registry catalog.Registry, input createInput) []huh.Option[string] {
-	if input.Mode == string(catalog.ProjectModeFrontend) {
-		return []huh.Option[string]{huh.NewOption("None", noneSelectionValue)}
-	}
-
-	packs := selectedPacks(registry, input)
-	if usesCloudflareWorkers(input) {
-		return []huh.Option[string]{
-			huh.NewOption("Cloudflare R2 (required for Workers; D1 + KV are configured too)", string(catalog.StorageR2)),
-		}
-	}
-	if !hasCapability(packs, func(pack catalog.Pack) bool { return pack.Capabilities.SupportsStorage }) {
-		return []huh.Option[string]{huh.NewOption("None", noneSelectionValue)}
-	}
-
-	options := []huh.Option[string]{
-		huh.NewOption("Cloudflare R2 (recommended)", string(catalog.StorageR2)),
-		huh.NewOption("Amazon S3", string(catalog.StorageS3)),
-		huh.NewOption("Supabase Storage", string(catalog.StorageSupabase)),
-	}
-
-	return append(options, huh.NewOption("None", noneSelectionValue))
-}
-
-func emailPromptOptions(registry catalog.Registry, input createInput) []huh.Option[string] {
-	if input.Mode == string(catalog.ProjectModeFrontend) {
-		return []huh.Option[string]{huh.NewOption("None", noneSelectionValue)}
-	}
-
-	packs := selectedPacks(registry, input)
-	if !hasCapability(packs, func(pack catalog.Pack) bool { return pack.Capabilities.SupportsEmail }) {
-		return []huh.Option[string]{huh.NewOption("None", noneSelectionValue)}
-	}
-
-	return []huh.Option[string]{
-		huh.NewOption("Resend (recommended)", string(catalog.EmailResend)),
-		huh.NewOption("None", noneSelectionValue),
-	}
-}
-
-func shouldPromptPackageManager(registry catalog.Registry, input createInput) bool {
-	return len(allowedPackageManagers(registry, input)) > 0
-}
-
-func allowedPackageManagers(registry catalog.Registry, input createInput) []catalog.PackageManager {
-	packs := selectedPacks(registry, input)
-	var allowed []catalog.PackageManager
-
-	for _, pack := range packs {
-		if pack.Language != catalog.LanguageTypeScript {
-			continue
-		}
-
-		if allowed == nil {
-			allowed = append(allowed, supportedManagersForPack(pack)...)
-			continue
-		}
-
-		allowed = intersectPackageManagers(allowed, supportedManagersForPack(pack))
-	}
-
-	return allowed
-}
-
-func recommendedPackageManager(registry catalog.Registry, input createInput, allowed []catalog.PackageManager) catalog.PackageManager {
-	for _, pack := range selectedPacks(registry, input) {
-		if pack.External == nil {
-			continue
-		}
-
-		if slices.Contains(allowed, pack.External.RecommendedPackageManager) {
-			return pack.External.RecommendedPackageManager
-		}
-	}
-
-	if len(allowed) > 0 {
-		return allowed[0]
-	}
-
-	return catalog.PackageManagerNone
-}
-
-func preferredPackageManagerOrder() []catalog.PackageManager {
-	return []catalog.PackageManager{
-		catalog.PackageManagerPNPM,
-		catalog.PackageManagerNPM,
-		catalog.PackageManagerBun,
-		catalog.PackageManagerYarn,
-	}
-}
-
-func supportedManagersForPack(pack catalog.Pack) []catalog.PackageManager {
-	managers := make([]catalog.PackageManager, 0)
-
-	if pack.External == nil {
-		return managers
-	}
-
-	for _, command := range pack.External.Commands {
-		managers = append(managers, command.PackageManager)
-	}
-
-	return managers
-}
-
-func intersectPackageManagers(left []catalog.PackageManager, right []catalog.PackageManager) []catalog.PackageManager {
-	intersection := make([]catalog.PackageManager, 0)
-
-	for _, candidate := range left {
-		if slices.Contains(right, candidate) && !slices.Contains(intersection, candidate) {
-			intersection = append(intersection, candidate)
-		}
-	}
-
-	return intersection
-}
-
-func selectedPacks(registry catalog.Registry, input createInput) []catalog.Pack {
-	packs := make([]catalog.Pack, 0, 2)
-
-	if input.Frontend != "" {
-		if pack, ok := registry.Get(catalog.PackID(input.Frontend)); ok {
-			packs = append(packs, pack)
-		}
-	}
-
-	if input.Backend != "" {
-		if pack, ok := registry.Get(catalog.PackID(input.Backend)); ok {
-			packs = append(packs, pack)
-		}
-	}
-
-	return packs
-}
-
-func hasCapability(packs []catalog.Pack, supports func(pack catalog.Pack) bool) bool {
-	for _, pack := range packs {
-		if supports(pack) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func hasRecommendedSkills(registry catalog.Registry, input createInput) bool {
-	for _, pack := range selectedPacks(registry, input) {
-		if pack.SkillAssets != nil {
-			return true
-		}
-	}
-
-	for _, addon := range selectedAddons(input) {
-		if addon.SkillAssets != nil {
-			return true
-		}
-	}
-
-	return false
-}
-
-func selectedAddons(input createInput) []catalog.Addon {
-	if input.Backend == "" {
-		return nil
-	}
-
-	return catalog.MustDefaultAddonRegistry().Resolve(
-		catalog.PackID(input.Backend),
-		authOptionFromInput(input.Auth),
-		databaseOptionFromInput(input.Database),
-		storageOptionFromInput(input.Storage),
-		emailOptionFromInput(input.Email),
-	)
-}
-
-func authOptionFromInput(value string) catalog.AuthOption {
-	option, err := parseAuthOption(value)
-	if err != nil {
-		return catalog.AuthNone
-	}
-
-	return option
-}
-
-func databaseOptionFromInput(value string) catalog.DatabaseOption {
-	option, err := parseDatabaseOption(value)
-	if err != nil {
-		return catalog.DatabaseNone
-	}
-
-	return option
-}
-
-func storageOptionFromInput(value string) catalog.StorageOption {
-	option, err := parseStorageOption(value)
-	if err != nil {
-		return catalog.StorageNone
-	}
-
-	return option
-}
-
-func emailOptionFromInput(value string) catalog.EmailOption {
-	option, err := parseEmailOption(value)
-	if err != nil {
-		return catalog.EmailNone
-	}
-
-	return option
-}
-
-func requiresFrontendPack(mode string) bool {
-	return mode == string(catalog.ProjectModeFrontend) || mode == string(catalog.ProjectModeFullStack)
-}
-
-func requiresBackendPack(mode string) bool {
-	return mode == string(catalog.ProjectModeBackend) || mode == string(catalog.ProjectModeFullStack)
-}
-
-func normalizeValue(value string) string {
-	return strings.TrimSpace(strings.ToLower(value))
-}
-
-func promptSelectionSteps(cmd *cobra.Command, registry catalog.Registry, input *createInput, flagState commandFlagState) error {
-	applySelectionConstraints(registry, input)
-
-	if input.ProjectName == "" {
+func promptForMissingValues(cmd *cobra.Command, registry catalog.Registry, addonRegistry catalog.AddonRegistry, input *createInput, flagState commandFlagState) error {
+	if strings.TrimSpace(input.ProjectName) == "" {
 		field := huh.NewInput().
-			Title("Project name").
-			Value(&input.ProjectName).
-			Validate(func(value string) error {
-				if strings.TrimSpace(value) == "" {
-					return errors.New("project name is required")
-				}
-
-				return nil
-			})
-
-		if err := runPromptForm(cmd, field); err != nil {
+			Title("What is the name of your project?").
+			Value(&input.ProjectName)
+		if err := runCreatePrompt(cmd, "Project", "", field); err != nil {
 			return err
 		}
-
 		input.ProjectName = strings.TrimSpace(input.ProjectName)
 	}
 
-	if input.Mode == "" {
-		field := huh.NewSelect[string]().
-			Title("What do you want to build?").
-			Value(&input.Mode).
-			Options(
-				huh.NewOption("Fullstack", string(catalog.ProjectModeFullStack)),
-				huh.NewOption("Frontend only", string(catalog.ProjectModeFrontend)),
-				huh.NewOption("Backend only", string(catalog.ProjectModeBackend)),
-			)
+	frontendGroup := recommendedPackGroup(catalog.PackCategoryFrontend)
+	backendGroup := recommendedPackGroup(catalog.PackCategoryBackend)
+	showAddons := len(input.AddOns) > 0
 
-		if err := runPromptForm(cmd, field); err != nil {
+	for step := promptStepFrontendGroup; step <= promptStepReviewChoice; {
+		if !promptStepVisible(step, registry, addonRegistry, *input, showAddons, flagState) {
+			step++
+			continue
+		}
+
+		back, err := runPromptStep(cmd, registry, addonRegistry, input, &frontendGroup, &backendGroup, &showAddons, flagState, step)
+		if err != nil {
 			return err
 		}
-	}
-
-	applySelectionConstraints(registry, input)
-
-	if requiresFrontendPack(input.Mode) && input.Frontend == "" {
-		input.Frontend = string(catalog.PackIDNextJS)
-		field := huh.NewSelect[string]().
-			Title("Frontend stack").
-			Value(&input.Frontend).
-			Options(frontendOptions(registry)...)
-
-		if err := runPromptForm(cmd, field); err != nil {
-			return err
-		}
-	}
-
-	applySelectionConstraints(registry, input)
-
-	if requiresBackendPack(input.Mode) && input.Backend == "" {
-		input.Backend = string(catalog.PackIDHonoNode)
-		field := huh.NewSelect[string]().
-			Title("Backend stack").
-			Description("Cloudflare Workers includes Wrangler dev, staging, and production environments with D1, KV, and R2 bindings.").
-			Value(&input.Backend).
-			Options(backendOptions(registry)...)
-
-		if err := runPromptForm(cmd, field); err != nil {
-			return err
-		}
-	}
-
-	applySelectionConstraints(registry, input)
-	applyWorkersLockedDefaults(input)
-
-	if shouldPromptPackageManager(registry, *input) && input.PackageManager == "" {
-		recommended := recommendedPackageManager(registry, *input, allowedPackageManagers(registry, *input))
-		if recommended != catalog.PackageManagerNone {
-			input.PackageManager = string(recommended)
-		}
-
-		field := huh.NewSelect[string]().
-			Title("JavaScript package manager").
-			Value(&input.PackageManager).
-			Options(packageManagerOptions(registry, *input)...)
-
-		if err := runPromptForm(cmd, field); err != nil {
-			return err
-		}
-	}
-
-	applySelectionConstraints(registry, input)
-
-	if input.Auth == "" {
-		authOptions := authPromptOptions(registry, *input)
-		if len(authOptions) == 1 {
-			input.Auth = authOptions[0].Value
-		} else {
-			recommended := recommendedAuthOption(selectedPacks(registry, *input))
-			if recommended != catalog.AuthNone {
-				input.Auth = string(recommended)
+		if back {
+			for step--; step >= promptStepFrontendGroup; step-- {
+				if promptStepVisible(step, registry, addonRegistry, *input, showAddons, flagState) {
+					break
+				}
 			}
-			field := huh.NewSelect[string]().
-				Title("Authentication").
-				Value(&input.Auth).
-				Options(authOptions...)
-
-			if err := runPromptForm(cmd, field); err != nil {
-				return err
+			if step < promptStepFrontendGroup {
+				step = promptStepFrontendGroup
 			}
+			continue
 		}
-	}
 
-	applySelectionConstraints(registry, input)
+		applyAutomaticSelections(registry, addonRegistry, input)
 
-	if input.Database == "" {
-		databaseOptions := databasePromptOptions(registry, *input)
-		if len(databaseOptions) == 1 {
-			input.Database = databaseOptions[0].Value
-		} else {
-			input.Database = string(recommendedDatabaseOption(*input))
-			field := huh.NewSelect[string]().
-				Title("Database").
-				Value(&input.Database).
-				Options(databaseOptions...)
-
-			if err := runPromptForm(cmd, field); err != nil {
-				return err
-			}
+		if step == promptStepReviewChoice {
+			return nil
 		}
-	}
 
-	applySelectionConstraints(registry, input)
-
-	if input.Storage == "" {
-		storageOptions := storagePromptOptions(registry, *input)
-		if len(storageOptions) == 1 {
-			input.Storage = storageOptions[0].Value
-		} else {
-			input.Storage = string(recommendedStorageOption(*input))
-			field := huh.NewSelect[string]().
-				Title("Storage").
-				Value(&input.Storage).
-				Options(storageOptions...)
-
-			if err := runPromptForm(cmd, field); err != nil {
-				return err
-			}
-		}
-	}
-
-	applySelectionConstraints(registry, input)
-
-	if input.Email == "" {
-		emailOptions := emailPromptOptions(registry, *input)
-		if len(emailOptions) == 1 {
-			input.Email = emailOptions[0].Value
-		} else {
-			input.Email = string(recommendedEmailOption(selectedPacks(registry, *input)))
-			field := huh.NewSelect[string]().
-				Title("Email").
-				Value(&input.Email).
-				Options(emailOptions...)
-
-			if err := runPromptForm(cmd, field); err != nil {
-				return err
-			}
-		}
-	}
-
-	if !flagState.gitInitSet {
-		if err := promptGitInit(cmd, input); err != nil {
-			return err
-		}
-	}
-
-	if !flagState.installSet {
-		if err := promptInstall(cmd, input); err != nil {
-			return err
-		}
-	}
-
-	if !flagState.recommendedSkillsSet && hasRecommendedSkills(registry, *input) {
-		input.RecommendedSkills = true
-		if err := promptRecommendedSkills(cmd, registry, input); err != nil {
-			return err
-		}
+		step++
 	}
 
 	return nil
 }
 
-func promptReviewStep(cmd *cobra.Command, registry catalog.Registry, input createInput) (reviewAction, error) {
-	action := string(reviewActionCreate)
-	field := huh.NewSelect[string]().
-		Title("Review selections").
-		Description("Create the project now, or jump back and change one choice.").
-		Value(&action).
-		Options(reviewOptions(registry, input)...)
+func packPromptOptions(registry catalog.Registry, category catalog.PackCategory, group packGroup) []huh.Option[string] {
+	options := make([]huh.Option[string], 0)
+	recommended := recommendedPackValueForGroup(category, group)
 
-	if err := runPromptForm(cmd, field); err != nil {
-		return "", err
-	}
+	for _, pack := range registry.All() {
+		if !pack.SupportsCategory(category) {
+			continue
+		}
+		if group != "" && packGroupForPack(pack) != group {
+			continue
+		}
 
-	return reviewAction(action), nil
-}
+		label := pack.DisplayName
+		if string(pack.ID) == recommended {
+			label += " (recommended)"
+		}
 
-func reviewOptions(registry catalog.Registry, input createInput) []huh.Option[string] {
-	options := []huh.Option[string]{
-		huh.NewOption("Create project", string(reviewActionCreate)),
-		huh.NewOption("Change mode ("+displayValue(input.Mode, "unset")+")", string(reviewActionMode)),
-		huh.NewOption("Change initialize git ("+boolLabel(input.GitInit)+")", string(reviewActionGitInit)),
-		huh.NewOption("Change install dependencies ("+boolLabel(input.Install)+")", string(reviewActionInstall)),
-	}
-
-	if requiresFrontendPack(input.Mode) {
-		options = append(options, huh.NewOption("Change frontend stack ("+packDisplayName(registry, input.Frontend)+")", string(reviewActionFrontend)))
-	}
-	if requiresBackendPack(input.Mode) {
-		options = append(options, huh.NewOption("Change backend stack ("+packDisplayName(registry, input.Backend)+")", string(reviewActionBackend)))
-	}
-	if shouldPromptPackageManager(registry, input) {
-		options = append(options, huh.NewOption("Change package manager ("+displayValue(input.PackageManager, "unset")+")", string(reviewActionPackageManager)))
-	}
-	if len(authPromptOptions(registry, input)) > 1 {
-		options = append(options, huh.NewOption("Change auth ("+displayValue(input.Auth, "none")+")", string(reviewActionAuth)))
-	}
-	if len(databasePromptOptions(registry, input)) > 1 {
-		options = append(options, huh.NewOption("Change database ("+displayValue(input.Database, "none")+")", string(reviewActionDatabase)))
-	}
-	if len(storagePromptOptions(registry, input)) > 1 {
-		options = append(options, huh.NewOption("Change storage ("+displayValue(input.Storage, "none")+")", string(reviewActionStorage)))
-	}
-	if len(emailPromptOptions(registry, input)) > 1 {
-		options = append(options, huh.NewOption("Change email ("+displayValue(input.Email, "none")+")", string(reviewActionEmail)))
-	}
-	if hasRecommendedSkills(registry, input) || input.RecommendedSkills {
-		options = append(options, huh.NewOption("Change recommended skills ("+boolLabel(input.RecommendedSkills)+")", string(reviewActionRecommendedSkills)))
+		options = append(options, huh.NewOption(label, string(pack.ID)))
 	}
 
 	return options
 }
 
-func resetInputForReview(input *createInput, action reviewAction) {
-	switch action {
-	case reviewActionMode:
-		input.Mode = ""
-		input.Frontend = ""
-		input.Backend = ""
-		input.PackageManager = ""
-		input.Auth = ""
-		input.Database = ""
-		input.Storage = ""
-		input.Email = ""
-	case reviewActionFrontend:
-		input.Frontend = ""
-		input.PackageManager = ""
-		input.Auth = ""
-	case reviewActionBackend:
-		input.Backend = ""
-		input.PackageManager = ""
-		input.Auth = ""
-		input.Database = ""
-		input.Storage = ""
-		input.Email = ""
-	case reviewActionPackageManager:
-		input.PackageManager = ""
-	case reviewActionAuth:
-		input.Auth = ""
-	case reviewActionDatabase:
-		input.Database = ""
-	case reviewActionStorage:
-		input.Storage = ""
-	case reviewActionEmail:
-		input.Email = ""
-	case reviewActionGitInit, reviewActionInstall, reviewActionRecommendedSkills:
+func promptStepVisible(step promptStep, registry catalog.Registry, addonRegistry catalog.AddonRegistry, input createInput, showAddons bool, flagState commandFlagState) bool {
+	switch step {
+	case promptStepFrontendGroup, promptStepFrontendPack:
+		return input.Frontend == ""
+	case promptStepBackendGroup, promptStepBackendPack:
+		return input.Backend == ""
+	case promptStepPackageManagerChoice:
+		return input.PackageManager == "" && shouldPromptPackageManager(registry, input)
+	case promptStepDatabaseChoice:
+		return input.Database == "" && shouldPromptSelectionKind(registry, addonRegistry, input, catalog.SelectionKindDatabase)
+	case promptStepORMChoice:
+		return input.ORM == "" && shouldPromptSelectionKind(registry, addonRegistry, input, catalog.SelectionKindORM)
+	case promptStepLintChoice:
+		return input.Lint == "" && shouldPromptSelectionKind(registry, addonRegistry, input, catalog.SelectionKindLint)
+	case promptStepRecommendedSkillsChoice:
+		return !flagState.recommendedSkillsSet && hasRecommendedSkills(registry, addonRegistry, input)
+	case promptStepShowAddonsChoice:
+		return len(input.AddOns) == 0 && len(optionalAddonOptions(registry, addonRegistry, input)) > 0
+	case promptStepOptionalAddonsChoice:
+		return showAddons && len(optionalAddonOptions(registry, addonRegistry, input)) > 0
+	case promptStepGitInitChoice:
+		return !flagState.gitInitSet
+	case promptStepInstallChoice:
+		return !flagState.installSet
+	case promptStepReviewChoice:
+		return true
+	default:
+		return false
 	}
 }
 
-func packDisplayName(registry catalog.Registry, packID string) string {
-	if packID == "" {
-		return "unset"
+func runPromptStep(cmd *cobra.Command, registry catalog.Registry, addonRegistry catalog.AddonRegistry, input *createInput, frontendGroup *string, backendGroup *string, showAddons *bool, flagState commandFlagState, step promptStep) (bool, error) {
+	switch step {
+	case promptStepFrontendGroup:
+		return stepFrontendGroup(cmd, registry, addonRegistry, input, frontendGroup, backendGroup, showAddons, flagState)
+	case promptStepFrontendPack:
+		return stepFrontendPack(cmd, registry, addonRegistry, input, frontendGroup, backendGroup, showAddons, flagState)
+	case promptStepBackendGroup:
+		return stepBackendGroup(cmd, registry, addonRegistry, input, frontendGroup, backendGroup, showAddons, flagState)
+	case promptStepBackendPack:
+		return stepBackendPack(cmd, registry, addonRegistry, input, frontendGroup, backendGroup, showAddons, flagState)
+	case promptStepPackageManagerChoice:
+		return stepPackageManager(cmd, registry, addonRegistry, input, frontendGroup, backendGroup, showAddons, flagState)
+	case promptStepDatabaseChoice:
+		return promptRequiredSelection(cmd, registry, addonRegistry, input, catalog.SelectionKindDatabase)
+	case promptStepORMChoice:
+		return promptRequiredSelection(cmd, registry, addonRegistry, input, catalog.SelectionKindORM)
+	case promptStepLintChoice:
+		return promptRequiredSelection(cmd, registry, addonRegistry, input, catalog.SelectionKindLint)
+	case promptStepRecommendedSkillsChoice:
+		return stepRecommendedSkills(cmd, registry, addonRegistry, input, frontendGroup, backendGroup, showAddons, flagState)
+	case promptStepShowAddonsChoice:
+		return stepShowAddons(cmd, registry, addonRegistry, input, frontendGroup, backendGroup, showAddons, flagState)
+	case promptStepOptionalAddonsChoice:
+		return stepOptionalAddons(cmd, registry, addonRegistry, input, frontendGroup, backendGroup, showAddons, flagState)
+	case promptStepGitInitChoice:
+		return stepGitInit(cmd, registry, addonRegistry, input, frontendGroup, backendGroup, showAddons, flagState)
+	case promptStepInstallChoice:
+		return stepInstall(cmd, registry, addonRegistry, input, frontendGroup, backendGroup, showAddons, flagState)
+	case promptStepReviewChoice:
+		return stepReview(cmd, registry, addonRegistry, input, frontendGroup, backendGroup, showAddons, flagState)
+	default:
+		return false, nil
 	}
-
-	pack, ok := registry.Get(catalog.PackID(packID))
-	if !ok {
-		return packID
-	}
-
-	return pack.DisplayName
 }
 
-func boolLabel(value bool) string {
-	if value {
-		return "yes"
+func optionPromptValues(options []optionValue) []huh.Option[string] {
+	promptOptions := make([]huh.Option[string], 0, len(options))
+	for _, option := range options {
+		label := option.Label
+		if option.Description != "" {
+			label += "\n" + option.Description
+		}
+		promptOptions = append(promptOptions, huh.NewOption(label, option.Value))
 	}
 
-	return "no"
+	return promptOptions
 }
 
-func promptGitInit(cmd *cobra.Command, input *createInput) error {
+func promptRequiredSelection(cmd *cobra.Command, registry catalog.Registry, addonRegistry catalog.AddonRegistry, input *createInput, kind catalog.SelectionKind) (bool, error) {
+	values := visibleSelectionValues(registry, addonRegistry, *input, kind)
+	options := make([]optionValue, 0, len(values))
+	for _, value := range values {
+		label := catalog.SelectionValueLabel(kind, value)
+		if value == recommendedSelectionValue(registry, addonRegistry, *input, kind) {
+			label += " (recommended)"
+		}
+		options = append(options, optionValue{
+			Value:       value,
+			Label:       label,
+			Description: "",
+		})
+	}
+
+	selected, back, err := promptSelectValue(
+		cmd,
+		"Foundations",
+		catalog.SelectionDefinitionFor(kind).Label,
+		optionPromptValues(options),
+		true,
+		8,
+	)
+	if err != nil {
+		return false, err
+	}
+	if back {
+		clearForRequiredSelectionBack(registry, addonRegistry, input, kind)
+		return true, nil
+	}
+
+	input.setSelection(kind, selected)
+	return false, nil
+}
+
+func promptReview(cmd *cobra.Command, registry catalog.Registry, input *createInput) error {
+	spec, selections, err := input.toSpec()
+	if err != nil {
+		return err
+	}
+
+	plan, err := resolver.Resolve(spec, registry)
+	if err != nil {
+		return err
+	}
+
+	confirmed := true
 	field := huh.NewConfirm().
-		Title("Initialize git?").
-		Value(&input.GitInit)
-
-	return runPromptForm(cmd, field)
-}
-
-func promptInstall(cmd *cobra.Command, input *createInput) error {
-	field := huh.NewConfirm().
-		Title("Install dependencies?").
-		Value(&input.Install)
-
-	return runPromptForm(cmd, field)
-}
-
-func promptRecommendedSkills(cmd *cobra.Command, registry catalog.Registry, input *createInput) error {
-	if !hasRecommendedSkills(registry, *input) {
-		input.RecommendedSkills = false
-		return nil
+		Title("Create this project?").
+		Description(renderCreateSummary(spec, selections, plan, registry)).
+		Value(&confirmed)
+	if err := runCreatePrompt(cmd, "Review", "", field); err != nil {
+		return err
+	}
+	if !confirmed {
+		return errors.New("create cancelled")
 	}
 
-	field := huh.NewConfirm().
-		Title("Copy recommended skills?").
-		Description("Copy pack- and integration-specific skill bundles into .agents/skills for coding agents.").
-		Value(&input.RecommendedSkills)
-
-	return runPromptForm(cmd, field)
+	return nil
 }
 
 func (input createInput) toSpec() (resolver.ProjectSpec, createSelections, error) {
-	mode, err := parseProjectMode(input.Mode)
-	if err != nil {
-		return resolver.ProjectSpec{}, createSelections{}, err
-	}
-
 	packageManager, err := parsePackageManager(input.PackageManager)
 	if err != nil {
 		return resolver.ProjectSpec{}, createSelections{}, err
 	}
 
-	database, err := parseDatabaseOption(input.Database)
-	if err != nil {
-		return resolver.ProjectSpec{}, createSelections{}, err
-	}
-
-	auth, err := parseAuthOption(input.Auth)
-	if err != nil {
-		return resolver.ProjectSpec{}, createSelections{}, err
-	}
-
-	storage, err := parseStorageOption(input.Storage)
-	if err != nil {
-		return resolver.ProjectSpec{}, createSelections{}, err
-	}
-
-	email, err := parseEmailOption(input.Email)
+	selections, err := input.selectionSet()
 	if err != nil {
 		return resolver.ProjectSpec{}, createSelections{}, err
 	}
 
 	spec := resolver.ProjectSpec{
 		ProjectName:    strings.TrimSpace(input.ProjectName),
-		Mode:           mode,
+		Mode:           catalog.ProjectModeFullStack,
 		FrontendPackID: catalog.PackID(input.Frontend),
 		BackendPackID:  catalog.PackID(input.Backend),
 		PackageManager: packageManager,
-		Database:       database,
-		Auth:           auth,
-		Storage:        storage,
-		Email:          email,
+		Selections:     selections,
+		AddonIDs:       append([]string(nil), input.AddOns...),
 	}
 
-	selections := createSelections{
+	return spec, createSelections{
+		AddOns:                   append([]string(nil), input.AddOns...),
 		InitializeGit:            input.GitInit,
 		InstallDependencies:      input.Install,
 		IncludeRecommendedSkills: input.RecommendedSkills,
-	}
-
-	return spec, selections, nil
-}
-
-func parseProjectMode(value string) (catalog.ProjectMode, error) {
-	switch value {
-	case string(catalog.ProjectModeFrontend):
-		return catalog.ProjectModeFrontend, nil
-	case string(catalog.ProjectModeBackend):
-		return catalog.ProjectModeBackend, nil
-	case string(catalog.ProjectModeFullStack):
-		return catalog.ProjectModeFullStack, nil
-	case "":
-		return "", nil
-	default:
-		return "", fmt.Errorf("unsupported mode %q", value)
-	}
+	}, nil
 }
 
 func parsePackageManager(value string) (catalog.PackageManager, error) {
@@ -868,201 +351,402 @@ func parsePackageManager(value string) (catalog.PackageManager, error) {
 	}
 }
 
-func parseDatabaseOption(value string) (catalog.DatabaseOption, error) {
-	switch value {
-	case "", "none":
-		return catalog.DatabaseNone, nil
-	case string(catalog.DatabaseD1):
-		return catalog.DatabaseD1, nil
-	case string(catalog.DatabasePostgres):
-		return catalog.DatabasePostgres, nil
-	case string(catalog.DatabaseSQLite):
-		return catalog.DatabaseSQLite, nil
-	case string(catalog.DatabaseSupabase):
-		return catalog.DatabaseSupabase, nil
-	default:
-		return catalog.DatabaseNone, fmt.Errorf("unsupported database %q", value)
-	}
-}
-
-func parseAuthOption(value string) (catalog.AuthOption, error) {
-	switch value {
-	case "", "none":
-		return catalog.AuthNone, nil
-	case string(catalog.AuthBetter):
-		return catalog.AuthBetter, nil
-	case string(catalog.AuthSupabase):
-		return catalog.AuthSupabase, nil
-	default:
-		return catalog.AuthNone, fmt.Errorf("unsupported auth option %q", value)
-	}
-}
-
-func parseStorageOption(value string) (catalog.StorageOption, error) {
-	switch value {
-	case "", "none":
-		return catalog.StorageNone, nil
-	case string(catalog.StorageR2):
-		return catalog.StorageR2, nil
-	case string(catalog.StorageS3):
-		return catalog.StorageS3, nil
-	case string(catalog.StorageSupabase):
-		return catalog.StorageSupabase, nil
-	default:
-		return catalog.StorageNone, fmt.Errorf("unsupported storage option %q", value)
-	}
-}
-
-func parseEmailOption(value string) (catalog.EmailOption, error) {
-	switch value {
-	case "", "none":
-		return catalog.EmailNone, nil
-	case string(catalog.EmailResend):
-		return catalog.EmailResend, nil
-	default:
-		return catalog.EmailNone, fmt.Errorf("unsupported email option %q", value)
-	}
-}
-
-func applyDerivedDefaults(registry catalog.Registry, input *createInput) {
-	if requiresFrontendPack(input.Mode) && input.Frontend == "" {
-		input.Frontend = string(catalog.PackIDNextJS)
+func selectionDescription(registry catalog.Registry, addonRegistry catalog.AddonRegistry, input createInput, kind catalog.SelectionKind, value string) string {
+	pack, ok := selectedPackForKind(registry, input, kind)
+	if !ok {
+		return ""
 	}
 
-	if requiresBackendPack(input.Mode) && input.Backend == "" {
-		input.Backend = string(catalog.PackIDHonoNode)
+	selections, err := input.selectionSet()
+	if err != nil {
+		return ""
 	}
+	selections.Set(kind, value)
 
-	if input.PackageManager == "" && shouldPromptPackageManager(registry, *input) {
-		recommended := recommendedPackageManager(registry, *input, allowedPackageManagers(registry, *input))
-		if recommended != catalog.PackageManagerNone {
-			input.PackageManager = string(recommended)
+	for _, addon := range addonRegistry.ResolveSelections(pack, catalog.SelectionDefinitionFor(kind).Target, selections) {
+		if addon.Kind == kind && addon.Value == value {
+			return addon.DisplayName
 		}
 	}
 
-	applyWorkersLockedDefaults(input)
-
-	packs := selectedPacks(registry, *input)
-
-	if input.Database == "" && input.Mode != string(catalog.ProjectModeFrontend) {
-		input.Database = string(recommendedDatabaseOption(*input))
-	}
-
-	if input.Auth == "" && input.Mode != string(catalog.ProjectModeFrontend) {
-		input.Auth = string(recommendedAuthOption(packs))
-	}
-
-	if input.Storage == "" && input.Mode != string(catalog.ProjectModeFrontend) {
-		input.Storage = string(recommendedStorageOption(*input))
-	}
-
-	if input.Email == "" && input.Mode != string(catalog.ProjectModeFrontend) {
-		input.Email = string(recommendedEmailOption(packs))
-	}
-
-	if !hasRecommendedSkills(registry, *input) {
-		input.RecommendedSkills = false
-	}
+	return catalog.SelectionValueLabel(kind, value)
 }
 
-func applySelectionConstraints(registry catalog.Registry, input *createInput) {
-	if !requiresFrontendPack(input.Mode) {
+func optionalAddonOptions(registry catalog.Registry, addonRegistry catalog.AddonRegistry, input createInput) []optionValue {
+	options := make([]optionValue, 0)
+
+	for _, kind := range optionalAddonKinds() {
+		values := visibleSelectionValues(registry, addonRegistry, input, kind)
+		for _, value := range values {
+			addonID := addonSelectionID(kind, value)
+			options = append(options, optionValue{
+				Value:       addonID,
+				Label:       catalog.SelectionValueLabel(kind, value),
+				Description: "",
+			})
+		}
+	}
+
+	return options
+}
+
+func promptSelectValue(cmd *cobra.Command, section string, title string, options []huh.Option[string], allowBack bool, maxHeight int) (string, bool, error) {
+	visibleOptions := append([]huh.Option[string]{}, options...)
+	if allowBack {
+		visibleOptions = append(visibleOptions, huh.NewOption("Go Back", backValue))
+	}
+
+	selected := ""
+	field := huh.NewSelect[string]().
+		Title(title).
+		Height(promptListHeight(len(visibleOptions), maxHeight)).
+		Value(&selected).
+		Options(visibleOptions...)
+	if err := runCreatePrompt(cmd, section, "", field); err != nil {
+		return "", false, err
+	}
+	if selected == backValue {
+		return "", true, nil
+	}
+	return selected, false, nil
+}
+
+func promptBooleanValue(cmd *cobra.Command, section string, title string, allowBack bool) (bool, bool, error) {
+	selected, back, err := promptSelectValue(
+		cmd,
+		section,
+		title,
+		[]huh.Option[string]{
+			huh.NewOption("Yes", "yes"),
+			huh.NewOption("No", "no"),
+		},
+		allowBack,
+		6,
+	)
+	if err != nil {
+		return false, false, err
+	}
+	if back {
+		return false, true, nil
+	}
+	return selected == "yes", false, nil
+}
+
+func stepFrontendGroup(cmd *cobra.Command, registry catalog.Registry, addonRegistry catalog.AddonRegistry, input *createInput, frontendGroup *string, backendGroup *string, showAddons *bool, flagState commandFlagState) (bool, error) {
+	selected, _, err := promptSelectValue(cmd, "Frontend", "Frontend type", packGroupPromptOptions(catalog.PackCategoryFrontend), false, 6)
+	if err != nil {
+		return false, err
+	}
+	*frontendGroup = selected
+	input.Frontend = ""
+	return false, nil
+}
+
+func stepFrontendPack(cmd *cobra.Command, registry catalog.Registry, addonRegistry catalog.AddonRegistry, input *createInput, frontendGroup *string, backendGroup *string, showAddons *bool, flagState commandFlagState) (bool, error) {
+	selected, back, err := promptSelectValue(cmd, "Frontend", "Pick your frontend pack", packPromptOptions(registry, catalog.PackCategoryFrontend, packGroup(*frontendGroup)), true, 8)
+	if err != nil {
+		return false, err
+	}
+	if back {
 		input.Frontend = ""
+		return true, nil
 	}
+	input.Frontend = selected
+	return false, nil
+}
 
-	if !requiresBackendPack(input.Mode) {
+func stepBackendGroup(cmd *cobra.Command, registry catalog.Registry, addonRegistry catalog.AddonRegistry, input *createInput, frontendGroup *string, backendGroup *string, showAddons *bool, flagState commandFlagState) (bool, error) {
+	selected, back, err := promptSelectValue(cmd, "Backend", "Backend type", packGroupPromptOptions(catalog.PackCategoryBackend), true, 8)
+	if err != nil {
+		return false, err
+	}
+	if back {
+		input.Frontend = ""
+		return true, nil
+	}
+	*backendGroup = selected
+	input.Backend = ""
+	return false, nil
+}
+
+func stepBackendPack(cmd *cobra.Command, registry catalog.Registry, addonRegistry catalog.AddonRegistry, input *createInput, frontendGroup *string, backendGroup *string, showAddons *bool, flagState commandFlagState) (bool, error) {
+	selected, back, err := promptSelectValue(cmd, "Backend", "Pick your backend pack", packPromptOptions(registry, catalog.PackCategoryBackend, packGroup(*backendGroup)), true, 8)
+	if err != nil {
+		return false, err
+	}
+	if back {
 		input.Backend = ""
+		return true, nil
+	}
+	input.Backend = selected
+	return false, nil
+}
+
+func stepPackageManager(cmd *cobra.Command, registry catalog.Registry, addonRegistry catalog.AddonRegistry, input *createInput, frontendGroup *string, backendGroup *string, showAddons *bool, flagState commandFlagState) (bool, error) {
+	selected, back, err := promptSelectValue(cmd, "Foundations", "Pick your package manager", optionPromptValues(packageManagerOptionLabels(registry, *input)), true, 8)
+	if err != nil {
+		return false, err
+	}
+	if back {
+		input.Backend = ""
+		return true, nil
+	}
+	input.PackageManager = selected
+	return false, nil
+}
+
+func stepRecommendedSkills(cmd *cobra.Command, registry catalog.Registry, addonRegistry catalog.AddonRegistry, input *createInput, frontendGroup *string, backendGroup *string, showAddons *bool, flagState commandFlagState) (bool, error) {
+	if !hasRecommendedSkills(registry, addonRegistry, *input) {
+		input.RecommendedSkills = false
+		return false, nil
+	}
+	value, back, err := promptBooleanValue(cmd, "Skills", "Copy recommended skills?", true)
+	if err != nil {
+		return false, err
+	}
+	if back {
+		input.Lint = ""
+		return true, nil
+	}
+	input.RecommendedSkills = value
+	return false, nil
+}
+
+func stepShowAddons(cmd *cobra.Command, registry catalog.Registry, addonRegistry catalog.AddonRegistry, input *createInput, frontendGroup *string, backendGroup *string, showAddons *bool, flagState commandFlagState) (bool, error) {
+	value, back, err := promptBooleanValue(cmd, "Addons", "Show optional addons?", true)
+	if err != nil {
+		return false, err
+	}
+	if back {
+		return true, nil
+	}
+	*showAddons = value
+	if !value {
+		input.AddOns = nil
+	}
+	return false, nil
+}
+
+func stepOptionalAddons(cmd *cobra.Command, registry catalog.Registry, addonRegistry catalog.AddonRegistry, input *createInput, frontendGroup *string, backendGroup *string, showAddons *bool, flagState commandFlagState) (bool, error) {
+	if !*showAddons {
+		return false, nil
+	}
+	options := optionalAddonOptions(registry, addonRegistry, *input)
+	if len(options) == 0 {
+		return false, nil
 	}
 
-	if input.Mode == string(catalog.ProjectModeFrontend) {
-		input.Auth = ""
-		input.Database = ""
-		input.Storage = ""
-		input.Email = ""
+	selected := append([]string(nil), input.AddOns...)
+	field := huh.NewMultiSelect[string]().
+		Title("Optional addons").
+		Filtering(true).
+		Height(promptListHeight(len(options), 10)).
+		Value(&selected).
+		Options(optionPromptValues(options)...)
+	if err := runCreatePrompt(cmd, "Addons", "", field); err != nil {
+		return false, err
 	}
+	input.AddOns = normalizeAddonIDs(selected)
+	return false, nil
+}
 
-	if !shouldPromptPackageManager(registry, *input) {
-		input.PackageManager = ""
-	} else if input.PackageManager != "" {
-		allowed := allowedPackageManagers(registry, *input)
-		if !slices.Contains(allowed, catalog.PackageManager(input.PackageManager)) {
+func stepGitInit(cmd *cobra.Command, registry catalog.Registry, addonRegistry catalog.AddonRegistry, input *createInput, frontendGroup *string, backendGroup *string, showAddons *bool, flagState commandFlagState) (bool, error) {
+	value, back, err := promptBooleanValue(cmd, "Finishing Touches", "Initialize git?", true)
+	if err != nil {
+		return false, err
+	}
+	if back {
+		return true, nil
+	}
+	input.GitInit = value
+	return false, nil
+}
+
+func stepInstall(cmd *cobra.Command, registry catalog.Registry, addonRegistry catalog.AddonRegistry, input *createInput, frontendGroup *string, backendGroup *string, showAddons *bool, flagState commandFlagState) (bool, error) {
+	value, back, err := promptBooleanValue(cmd, "Finishing Touches", "Install dependencies?", true)
+	if err != nil {
+		return false, err
+	}
+	if back {
+		return true, nil
+	}
+	input.Install = value
+	return false, nil
+}
+
+func stepReview(cmd *cobra.Command, registry catalog.Registry, addonRegistry catalog.AddonRegistry, input *createInput, frontendGroup *string, backendGroup *string, showAddons *bool, flagState commandFlagState) (bool, error) {
+	return false, promptReview(cmd, registry, input)
+}
+
+func clearForRequiredSelectionBack(registry catalog.Registry, addonRegistry catalog.AddonRegistry, input *createInput, kind catalog.SelectionKind) {
+	switch kind {
+	case catalog.SelectionKindDatabase:
+		if shouldPromptPackageManager(registry, *input) {
 			input.PackageManager = ""
+			return
+		}
+		input.Backend = ""
+	case catalog.SelectionKindORM:
+		input.Database = ""
+	case catalog.SelectionKindLint:
+		input.ORM = ""
+	}
+}
+
+func runCreatePrompt(cmd *cobra.Command, section string, description string, fields ...huh.Field) error {
+	banner := huh.NewNote().
+		Title(openrepoBanner()).
+		Description(createPromptMeta(section, description))
+
+	allFields := make([]huh.Field, 0, len(fields)+1)
+	allFields = append(allFields, banner)
+	allFields = append(allFields, fields...)
+	return runPromptForm(cmd, allFields...)
+}
+
+func openrepoBanner() string {
+	return `
+ ██████╗ ██████╗ ███████╗███╗   ██╗██████╗ ███████╗██████╗  ██████╗
+██╔═══██╗██╔══██╗██╔════╝████╗  ██║██╔══██╗██╔════╝██╔══██╗██╔═══██╗
+██║   ██║██████╔╝█████╗  ██╔██╗ ██║██████╔╝█████╗  ██████╔╝██║   ██║
+██║   ██║██╔═══╝ ██╔══╝  ██║╚██╗██║██╔══██╗██╔══╝  ██╔═══╝ ██║   ██║
+╚██████╔╝██║     ███████╗██║ ╚████║██║  ██║███████╗██║     ╚██████╔╝
+ ╚═════╝ ╚═╝     ╚══════╝╚═╝  ╚═══╝╚═╝  ╚═╝╚══════╝╚═╝      ╚═════╝
+`
+}
+
+func createPromptMeta(section string, description string) string {
+	parts := make([]string, 0, 2)
+	if strings.TrimSpace(section) != "" {
+		parts = append(parts, strings.ToUpper(strings.TrimSpace(section)))
+	}
+	if strings.TrimSpace(description) != "" {
+		parts = append(parts, description)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func recommendedPackValue(category catalog.PackCategory) string {
+	if category == catalog.PackCategoryBackend {
+		return string(catalog.PackIDHonoNode)
+	}
+	return string(catalog.PackIDNextJS)
+}
+
+func recommendedPackGroup(category catalog.PackCategory) string {
+	if category == catalog.PackCategoryBackend {
+		return string(packGroupTypeScript)
+	}
+	return string(packGroupWeb)
+}
+
+func recommendedPackValueForGroup(category catalog.PackCategory, group packGroup) string {
+	switch {
+	case category == catalog.PackCategoryFrontend && group == packGroupMobile:
+		return string(catalog.PackIDExpo)
+	case category == catalog.PackCategoryBackend && group == packGroupPython:
+		return string(catalog.PackIDFastAPI)
+	case category == catalog.PackCategoryBackend && group == packGroupGo:
+		return string(catalog.PackIDGin)
+	case category == catalog.PackCategoryBackend && group == packGroupPHP:
+		return string(catalog.PackIDLaravel)
+	default:
+		return recommendedPackValue(category)
+	}
+}
+
+func packGroupPromptOptions(category catalog.PackCategory) []huh.Option[string] {
+	if category == catalog.PackCategoryFrontend {
+		return []huh.Option[string]{
+			huh.NewOption("Web", string(packGroupWeb)),
+			huh.NewOption("Mobile", string(packGroupMobile)),
 		}
 	}
 
-	if shouldClearSelection(authPromptOptions(registry, *input), input.Auth) {
-		input.Auth = ""
-	}
-
-	if shouldClearSelection(databasePromptOptions(registry, *input), input.Database) {
-		input.Database = ""
-	}
-
-	if shouldClearSelection(storagePromptOptions(registry, *input), input.Storage) {
-		input.Storage = ""
-	}
-
-	if shouldClearSelection(emailPromptOptions(registry, *input), input.Email) {
-		input.Email = ""
-	}
-
-	if !hasRecommendedSkills(registry, *input) {
-		input.RecommendedSkills = false
+	return []huh.Option[string]{
+		huh.NewOption("TypeScript", string(packGroupTypeScript)),
+		huh.NewOption("Python", string(packGroupPython)),
+		huh.NewOption("Go", string(packGroupGo)),
+		huh.NewOption("PHP", string(packGroupPHP)),
 	}
 }
 
-func applyWorkersLockedDefaults(input *createInput) {
-	if !usesCloudflareWorkers(*input) {
-		return
+func packGroupForPack(pack catalog.Pack) packGroup {
+	if pack.Category == catalog.PackCategoryFrontend {
+		if pack.Capabilities.Mobile {
+			return packGroupMobile
+		}
+		return packGroupWeb
 	}
 
-	if input.Database == "" {
-		input.Database = string(catalog.DatabaseD1)
-	}
-
-	if input.Storage == "" {
-		input.Storage = string(catalog.StorageR2)
+	switch pack.Language {
+	case catalog.LanguagePython:
+		return packGroupPython
+	case catalog.LanguageGo:
+		return packGroupGo
+	case catalog.LanguagePHP:
+		return packGroupPHP
+	default:
+		return packGroupTypeScript
 	}
 }
 
-func usesCloudflareWorkers(input createInput) bool {
-	return input.Backend == string(catalog.PackIDHonoWorkers)
-}
-
-func recommendedAuthOption(packs []catalog.Pack) catalog.AuthOption {
-	if hasCapability(packs, func(pack catalog.Pack) bool { return pack.Capabilities.SupportsBetterAuth }) {
-		return catalog.AuthBetter
+func promptListHeight(count int, max int) int {
+	if count <= 0 {
+		return 4
 	}
-	if hasCapability(packs, func(pack catalog.Pack) bool { return pack.Capabilities.SupportsSupabaseAuth }) {
-		return catalog.AuthSupabase
+	height := count + 2
+	if height < 4 {
+		height = 4
+	}
+	if height > max {
+		return max
+	}
+	return height
+}
+
+func applyAutomaticSelections(registry catalog.Registry, addonRegistry catalog.AddonRegistry, input *createInput) {
+	for _, kind := range []catalog.SelectionKind{
+		catalog.SelectionKindTests,
+		catalog.SelectionKindTailwind,
+	} {
+		if input.selectionValue(kind) != "" {
+			continue
+		}
+		if !shouldPromptSelectionKind(registry, addonRegistry, *input, kind) {
+			continue
+		}
+
+		input.setSelection(kind, recommendedSelectionValue(registry, addonRegistry, *input, kind))
+	}
+}
+
+func addonSelectionID(kind catalog.SelectionKind, value string) string {
+	switch kind {
+	case catalog.SelectionKindAuth:
+		return "auth:" + value
+	case catalog.SelectionKindStorage:
+		return "storage:" + value
+	case catalog.SelectionKindEmail:
+		return "email:" + value
+	case catalog.SelectionKindIcons:
+		return "icons:" + value
+	case catalog.SelectionKindComponents:
+		return "components:" + value
+	default:
+		return value
+	}
+}
+
+func hasRecommendedSkills(registry catalog.Registry, addonRegistry catalog.AddonRegistry, input createInput) bool {
+	for _, pack := range selectedPacks(registry, input) {
+		if pack.SkillAssets != nil {
+			return true
+		}
 	}
 
-	return catalog.AuthNone
-}
-
-func recommendedDatabaseOption(input createInput) catalog.DatabaseOption {
-	if usesCloudflareWorkers(input) {
-		return catalog.DatabaseD1
-	}
-
-	return catalog.DatabasePostgres
-}
-
-func recommendedStorageOption(input createInput) catalog.StorageOption {
-	return catalog.StorageR2
-}
-
-func recommendedEmailOption(packs []catalog.Pack) catalog.EmailOption {
-	if hasCapability(packs, func(pack catalog.Pack) bool { return pack.Capabilities.SupportsEmail }) {
-		return catalog.EmailResend
-	}
-
-	return catalog.EmailNone
-}
-
-func optionValuesContain(options []huh.Option[string], value string) bool {
-	for _, option := range options {
-		if option.Value == value {
+	for _, addon := range selectedAddons(registry, addonRegistry, input) {
+		if addon.SkillAssets != nil {
 			return true
 		}
 	}
@@ -1070,10 +754,21 @@ func optionValuesContain(options []huh.Option[string], value string) bool {
 	return false
 }
 
-func shouldClearSelection(options []huh.Option[string], value string) bool {
-	if optionValuesContain(options, value) {
-		return false
+func selectedAddons(registry catalog.Registry, addonRegistry catalog.AddonRegistry, input createInput) []catalog.Addon {
+	selections, err := input.selectionSet()
+	if err != nil {
+		return nil
 	}
 
-	return !(value == "none" && optionValuesContain(options, ""))
+	addons := make([]catalog.Addon, 0)
+	for _, definition := range catalog.AllSelectionDefinitions() {
+		pack, ok := selectedPackForKind(registry, input, definition.Kind)
+		if !ok {
+			continue
+		}
+
+		addons = append(addons, addonRegistry.ResolveSelections(pack, definition.Target, selections)...)
+	}
+
+	return addons
 }

@@ -1,0 +1,11 @@
+<?php
+
+namespace App\Support;
+
+class MailService
+{
+    public static function driver(): string
+    {
+        return '{{ .Email }}';
+    }
+}
